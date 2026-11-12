@@ -1,24 +1,44 @@
-import { Route, Routes } from "react-router-dom";
-import EstadoConexion from "@/features/health/EstadoConexion";
+import { Outlet, Route, Routes } from "react-router-dom";
+import Navbar from "@/components/Navbar";
+import Pie from "@/components/Pie";
+import Inicio from "@/pages/Inicio";
+import Productos from "@/pages/Productos";
+import Tiendas from "@/pages/Tiendas";
+import Solicitar from "@/pages/Solicitar";
+import Ingresar from "@/pages/Ingresar";
+import Estado from "@/pages/Estado";
+import Panel from "@/panels/Panel";
 
-function Inicio() {
+function Estructura() {
   return (
-    <main className="mx-auto max-w-xl p-6">
-      <h1 className="text-3xl font-bold">MERCADO EXTRA</h1>
-      <p className="mt-2 text-slate-700">Entorno preparado (Etapa 2). El diseno visual llega en la Etapa 3.</p>
-      <section className="mt-6">
-        <h2 className="mb-2 font-semibold">Estado del entorno</h2>
-        <EstadoConexion />
-      </section>
-    </main>
+    <>
+      <a href="#contenido" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-maiz focus:px-4 focus:py-2 focus:font-bold">
+        Saltar al contenido
+      </a>
+      <Navbar />
+      <div id="contenido">
+        <Outlet />
+      </div>
+      <Pie />
+    </>
   );
 }
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Inicio />} />
-      <Route path="*" element={<main className="p-6">Pagina no encontrada.</main>} />
+      <Route element={<Estructura />}>
+        <Route path="/" element={<Inicio />} />
+        <Route path="/productos" element={<Productos />} />
+        <Route path="/tiendas" element={<Tiendas />} />
+        <Route path="/solicitar" element={<Solicitar />} />
+        <Route path="/ingresar" element={<Ingresar />} />
+        <Route path="/estado" element={<Estado />} />
+        <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />
+        <Route path="/vendedor/:seccion?" element={<Panel panel="vendedor" />} />
+        <Route path="/admin/:seccion?" element={<Panel panel="admin" />} />
+        <Route path="*" element={<main className="mx-auto max-w-xl px-4 py-14 text-center"><h1 className="font-display text-3xl font-extrabold text-pino">Página no encontrada</h1></main>} />
+      </Route>
     </Routes>
   );
 }

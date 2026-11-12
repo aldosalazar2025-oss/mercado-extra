@@ -2,12 +2,13 @@
 
 | Etapa | Estado | Probado | Aprobado |
 |---|---|---|---|
-| 1. Arquitectura | Entregada | N/A (diseno) | Pendiente de confirmacion final |
-| 2. Entorno | Codigo listo | Compilacion local OK (tsc + vite build) | Pendiente |
-| 3 a 19 | No iniciadas | - | - |
+| 1. Arquitectura | Entregada | N/A (diseño) | Pendiente de confirmación final |
+| 2. Entorno | Cerrada | Local y Netlify confirmados por el usuario | Sí |
+| 3. Diseño visual | Código listo | Compilación OK (tsc + vite build); no revisado visualmente por el desarrollador | Pendiente |
+| 4 a 19 | No iniciadas | - | - |
 
-## Etapa 2
-Hecho: proyecto React+TS+Vite, Tailwind, React Router, TanStack Query, cliente Supabase, netlify.toml (redireccion SPA y cabeceras), .env.example, .gitignore.
-Probado: `npm run build` sin errores.
-NO probado todavia (requiere tus cuentas): conexion real a Supabase, despliegue en Netlify, redireccion SPA en produccion.
-Pendiente: zona geografica de lanzamiento; Supabase CLI y migraciones (Etapa 4).
+## Etapa 3
+Hecho: identidad (logotipo SVG, paleta verde mercado y amarillo maíz, tipografías Bricolage Grotesque y Nunito Sans), página de inicio, navegación con menú móvil, tarjetas de producto y tienda, formulario de solicitud, filtros del catálogo (datos ficticios), estructura de los tres paneles, página de ingreso (vista previa) y estado del sistema en /estado.
+Accesibilidad: enlace "Saltar al contenido", foco visible, botones de 44 px de alto mínimo.
+Pendiente: zona de lanzamiento; revisión visual en navegador por el usuario; ajustes que pida.
+Todos los datos son ficticios (src/lib/demoData.ts).
