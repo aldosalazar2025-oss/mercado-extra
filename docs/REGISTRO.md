@@ -20,4 +20,5 @@ Pendiente: funciones de negocio (elegir oferta, pedidos, código de entrega, ven
 Hecho: Google OAuth, sesión persistente, registro (nombre, DNI, celular opcional, foto del DNI, selfie, consentimiento), compresión de fotos, subida a bucket privado, estados de verificación, página Mi cuenta, panel admin de identidades con registro de auditoría, rutas protegidas por sesión y por rol, aviso suave de registro pendiente (no bloquea).
 NO probado: flujo real con Google y Supabase, subida de fotos desde navegador, aspecto visual.
 Límite conocido: el registro de auditoría al abrir documentos lo hace la aplicación; una versión a prueba de manipulación requiere una Edge Function (Etapa 15/18).
-Pendiente: política de privacidad definitiva (revisión legal); decidir si un mismo DNI puede usarse en más de una cuenta.
+Decidido por el usuario: un solo DNI por cuenta (migración 0007, índice único; los registros rechazados liberan el DNI). 199 pruebas de base de datos aprobadas.
+Pendiente: política de privacidad definitiva (revisión legal).

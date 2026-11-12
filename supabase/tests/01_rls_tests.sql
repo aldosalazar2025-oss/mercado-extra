@@ -416,6 +416,17 @@ select t.ok(t.afecta($q$delete from storage.objects where bucket_id = 'identity-
 select t.anon();
 select t.ok(t.falla(format('insert into public.identity_verifications (user_id, dni) values (%L, %L)', t.u(2), '33333333')), 'visitante no registra identidades');
 
+-- 12c. Un DNI por cuenta
+select t.como(t.u(2));
+select t.ok(t.falla(format('insert into public.identity_verifications (user_id, dni) values (%L, %L)', t.u(2), '12345678')), 'un DNI ya usado en otra cuenta se rechaza');
+select t.ok(t.afecta(format('insert into public.identity_verifications (user_id, dni) values (%L, %L)', t.u(2), '44444444')) = 1, 'un DNI nuevo se registra');
+select t.como(t.u(4));
+select t.ok(t.falla(format('insert into public.identity_verifications (user_id, dni) values (%L, %L)', t.u(4), '44444444')), 'el mismo DNI pendiente en otra cuenta se rechaza');
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.identity_verifications set status = %L, rejection_reason = %L, reviewed_by = %L, reviewed_at = now() where user_id = %L', 'rechazado', 'No coincide con la selfie', t.u(7), t.u(2))) = 1, 'administrador rechaza a un suplantador');
+select t.como(t.u(4));
+select t.ok(t.afecta(format('insert into public.identity_verifications (user_id, dni) values (%L, %L)', t.u(4), '44444444')) = 1, 'al rechazar, el DNI queda libre para su dueño real');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

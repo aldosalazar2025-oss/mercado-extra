@@ -10,6 +10,7 @@ Todas las migraciones están en `migrations/` y se aplican **en orden** (el pref
 | `20261112000400_rls.sql` | Políticas RLS (83) y privilegios |
 | `20261112000500_storage.sql` | 6 buckets y sus políticas |
 | `20261112000600_catalogos.sql` | Roles, permisos y categorías iniciales |
+| `20261112000700_dni_unico.sql` | Un DNI por cuenta (Etapa 5) |
 
 ## Aplicarlas en tu proyecto Supabase de DESARROLLO (gratis, sin instalar nada)
 1. Entra a tu proyecto **mercado-extra-dev** > **SQL Editor** > **New query**.
@@ -36,5 +37,5 @@ notify pgrst, 'reload schema';
 ```
 
 ## Pruebas automáticas de permisos (opcional, requiere PostgreSQL propio)
-`tests/run_tests.sh` crea una base temporal, simula lo mínimo de Supabase, aplica las migraciones y ejecuta 181 pruebas con usuarios ficticios.
+`tests/run_tests.sh` crea una base temporal, simula lo mínimo de Supabase, aplica las migraciones y ejecuta 199 pruebas con usuarios ficticios.
 No hace falta que las ejecutes tú: yo las corro en cada etapa.

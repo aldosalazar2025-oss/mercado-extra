@@ -75,6 +75,9 @@ export default function Registro() {
         : await supabase.from("identity_verifications").insert({ ...datos, user_id: uid });
       if (guardado.error) {
         await bucket.remove([rutaDni, rutaSelfie]);
+        if (guardado.error.code === "23505") {
+          throw new Error("Este DNI ya está registrado en otra cuenta. Si crees que es un error, escríbenos para ayudarte.");
+        }
         throw new Error("No se pudo guardar tu registro. Inténtalo de nuevo.");
       }
 
