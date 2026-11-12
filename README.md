@@ -56,3 +56,10 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 ## Seguridad
 - Solo la anon key va en el navegador. La service_role nunca.
 - `.env.local` esta en `.gitignore`; no se sube a GitHub.
+
+## Etapa 5: inicio de sesión con Google
+1. Supabase > **Authentication > URL Configuration**: en *Site URL* pon la dirección de tu sitio en Netlify y en *Redirect URLs* agrega `http://localhost:5173/**` y `https://TU-SITIO.netlify.app/**`.
+2. Google Cloud: mientras la app esté en modo "Testing", solo pueden entrar las cuentas agregadas en **Pantalla de consentimiento > Usuarios de prueba**.
+3. Primer administrador (después de entrar una vez con tu cuenta), en el SQL Editor de Supabase dev:
+   `update public.profiles set is_admin = true where email = 'TU-CORREO@gmail.com';`
+4. Rutas nuevas: `/ingresar`, `/registro`, `/cuenta`, `/privacidad`, `/admin/verificacion-de-identidad` (solo administradores).

@@ -1,4 +1,5 @@
 import { Link, NavLink, useParams } from "react-router-dom";
+import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
 import { paneles, slug, type PanelId } from "./config";
 
 const resumenDemo = [
@@ -44,9 +45,13 @@ export default function Panel({ panel }: { panel: PanelId }) {
             ))}
           </ul>
         )}
-        <p className="rounded-xl bg-white p-6 text-suave">
-          Vista previa del diseño con datos de ejemplo. Esta sección se vuelve funcional en una etapa posterior.
-        </p>
+        {panel === "admin" && actual === "Verificación de identidad" ? (
+          <AdminVerificaciones />
+        ) : (
+          <p className="rounded-xl bg-white p-6 text-suave">
+            Vista previa del diseño con datos de ejemplo. Esta sección se vuelve funcional en una etapa posterior.
+          </p>
+        )}
         <p className="text-sm">
           <Link to="/" className="font-bold text-mercado underline">Volver al inicio</Link>
         </p>

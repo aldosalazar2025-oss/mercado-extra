@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import Logo from "./Logo";
 import { clasesBoton } from "./Boton";
+import { useAuth } from "@/features/auth/AuthContext";
 
 const enlaces = [
   { to: "/productos", texto: "Productos" },
@@ -13,6 +14,7 @@ const estiloEnlace = ({ isActive }: { isActive: boolean }) =>
 
 export default function Navbar() {
   const [abierto, setAbierto] = useState(false);
+  const { session, cerrarSesion } = useAuth();
   return (
     <header className="sticky top-0 z-20 border-b border-borde bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
@@ -25,7 +27,14 @@ export default function Navbar() {
             <NavLink key={e.to} to={e.to} className={estiloEnlace}>{e.texto}</NavLink>
           ))}
           <a href="/#como-funciona" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja">Cómo funciona</a>
-          <Link to="/ingresar" className={`${clasesBoton("contorno")} ml-2`}>Ingresar</Link>
+          {session ? (
+            <>
+              <Link to="/cuenta" className={`${clasesBoton("contorno")} ml-2`}>Mi cuenta</Link>
+              <button type="button" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja" onClick={() => void cerrarSesion()}>Salir</button>
+            </>
+          ) : (
+            <Link to="/ingresar" className={`${clasesBoton("contorno")} ml-2`}>Ingresar</Link>
+          )}
           <Link to="/solicitar" className={clasesBoton("primario")}>Publicar solicitud</Link>
         </nav>
 
@@ -50,7 +59,14 @@ export default function Navbar() {
           ))}
           <a href="/#como-funciona" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja">Cómo funciona</a>
           <Link to="/solicitar" className={`${clasesBoton("primario")} mt-2`} onClick={() => setAbierto(false)}>Publicar solicitud</Link>
-          <Link to="/ingresar" className={clasesBoton("contorno")} onClick={() => setAbierto(false)}>Ingresar</Link>
+          {session ? (
+            <>
+              <Link to="/cuenta" className={clasesBoton("contorno")} onClick={() => setAbierto(false)}>Mi cuenta</Link>
+              <button type="button" className="rounded-lg px-3 py-2 text-left font-bold hover:bg-hoja" onClick={() => { setAbierto(false); void cerrarSesion(); }}>Salir</button>
+            </>
+          ) : (
+            <Link to="/ingresar" className={clasesBoton("contorno")} onClick={() => setAbierto(false)}>Ingresar</Link>
+          )}
         </nav>
       )}
     </header>

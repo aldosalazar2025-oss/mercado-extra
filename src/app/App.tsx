@@ -8,6 +8,12 @@ import Solicitar from "@/pages/Solicitar";
 import Ingresar from "@/pages/Ingresar";
 import Estado from "@/pages/Estado";
 import Panel from "@/panels/Panel";
+import AvisoRegistro from "@/components/AvisoRegistro";
+import AuthCallback from "@/features/auth/AuthCallback";
+import { RequiereAdmin, RequiereSesion } from "@/features/auth/Rutas";
+import Registro from "@/features/identidad/Registro";
+import Cuenta from "@/features/identidad/Cuenta";
+import Privacidad from "@/pages/Privacidad";
 
 function Estructura() {
   return (
@@ -16,6 +22,7 @@ function Estructura() {
         Saltar al contenido
       </a>
       <Navbar />
+      <AvisoRegistro />
       <div id="contenido">
         <Outlet />
       </div>
@@ -34,9 +41,17 @@ export default function App() {
         <Route path="/solicitar" element={<Solicitar />} />
         <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/estado" element={<Estado />} />
-        <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />
-        <Route path="/vendedor/:seccion?" element={<Panel panel="vendedor" />} />
-        <Route path="/admin/:seccion?" element={<Panel panel="admin" />} />
+        <Route path="/privacidad" element={<Privacidad />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route element={<RequiereSesion />}>
+          <Route path="/registro" element={<Registro />} />
+          <Route path="/cuenta" element={<Cuenta />} />
+          <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />
+          <Route path="/vendedor/:seccion?" element={<Panel panel="vendedor" />} />
+          <Route element={<RequiereAdmin />}>
+            <Route path="/admin/:seccion?" element={<Panel panel="admin" />} />
+          </Route>
+        </Route>
         <Route path="*" element={<main className="mx-auto max-w-xl px-4 py-14 text-center"><h1 className="font-display text-3xl font-extrabold text-pino">Página no encontrada</h1></main>} />
       </Route>
     </Routes>
