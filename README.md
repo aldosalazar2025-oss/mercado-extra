@@ -73,3 +73,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112000900_catalogo.sql`.
 2. Rutas nuevas: `/productos`, `/productos/:id`, `/tiendas`, `/tiendas/:id`, `/vendedor/mis-productos`, y en el panel admin las secciones **Categorías** y **Productos**.
 3. Para ver productos en el catálogo público la tienda debe estar **aprobada** y el producto **publicado**.
+
+## Etapa 8: solicitudes
+1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001000_solicitudes.sql`.
+2. Rutas nuevas: `/solicitar` (pide iniciar sesión), `/comprador/mis-solicitudes` y `/comprador/mis-solicitudes/:id/editar`.
+3. Opcional: vencimiento automático con `supabase/OPCIONAL_pg_cron.sql`.

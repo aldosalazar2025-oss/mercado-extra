@@ -8,8 +8,9 @@
 | 4. Base de datos y seguridad | Cerrada | 181 pruebas locales + migraciones aplicadas y verificadas en Supabase dev por el usuario | Sí |
 | 5. Registro y autenticación | Cerrada | Ingreso con Google confirmado por el usuario; 199 pruebas de base de datos | Sí |
 | 6. Tiendas y empleados | Cerrada | Probada por el usuario en pantalla (invitaciones, permisos, menú) | Sí |
-| 7. Catálogo | Código listo, falta aplicar migración 0009 | Compilación OK; 268 pruebas de base de datos. Sin probar en pantalla | Pendiente |
-| 8 a 19 | No iniciadas | - | - |
+| 7. Catálogo | Cerrada | 268 pruebas de base de datos; aprobada por el usuario | Sí |
+| 8. Solicitudes de compradores | Código listo, falta aplicar migración 0010 | Compilación OK; 294 pruebas de base de datos. Sin probar en pantalla | Pendiente |
+| 9 a 19 | No iniciadas | - | - |
 
 ## Etapa 4
 Hecho: 6 migraciones (38 tablas, 83 políticas RLS, 6 buckets, catálogos), funciones de permisos por tienda, protección de campos sensibles, historial de ofertas inmutable, lectura de chat por el administrador con motivo y auditoría.
@@ -38,3 +39,10 @@ Base de datos (migración 0009): búsqueda por texto en español + nombre + etiq
 Límites conocidos: la búsqueda no tolera errores de escritura ni ignora tildes (pg_trgm/unaccent se evaluarán); distancia por línea recta; la página de solicitudes aún usa categorías de ejemplo (Etapa 8).
 NO probado: pantallas en navegador, subida real de fotos.
 Ajuste Etapa 7 (por consulta del usuario): "Mis productos" solo lista las tiendas donde la persona tiene el permiso de gestionar productos; sin ese permiso la sección no aparece en el menú.
+
+## Etapa 8
+Hecho: publicar solicitud (producto, descripción, categoría, talla/color/modelo, presupuesto máximo, negociable, hasta 5 fotos de referencia privadas), "Mis solicitudes" con tiempo restante, modificar, renovar 24 h, cancelar y eliminar; vencimiento a las 24 h con aviso interno al comprador; volver a la página deseada después de iniciar sesión.
+Reglas en base de datos (migración 0010): el contenido solo se modifica mientras no hay ofertas; la renovación reinicia las 24 h y se limita a 5; las solicitudes con ofertas NO vencen solas (el comprador aún puede elegir); máximo 10 solicitudes abiertas por comprador; fotos solo de la carpeta de la solicitud; el comprador puede borrar sus fotos.
+Vencimiento: la web llama a vencer_solicitudes() al abrir "Mis solicitudes"; opcionalmente se programa cada 5 min con pg_cron (supabase/OPCIONAL_pg_cron.sql, no probado).
+Pendiente: coincidencias con tiendas y campana de notificaciones (Etapa 9); si se cambia la categoría de una solicitud, las coincidencias se recalculan en la Etapa 9; ver y elegir ofertas (Etapa 10).
+NO probado: pantallas en navegador, subida real de fotos.

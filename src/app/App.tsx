@@ -17,6 +17,7 @@ import Privacidad from "@/pages/Privacidad";
 import ProductoDetalle from "@/pages/ProductoDetalle";
 import TiendaPublica from "@/pages/TiendaPublica";
 import ProductoEditor from "@/features/catalogo/ProductoEditor";
+import SolicitudEditor from "@/features/solicitudes/SolicitudEditor";
 import NuevaTienda from "@/features/tiendas/NuevaTienda";
 import TiendaDetalle from "@/features/tiendas/TiendaDetalle";
 
@@ -45,12 +46,13 @@ export default function App() {
         <Route path="/productos/:id" element={<ProductoDetalle />} />
         <Route path="/tiendas" element={<Tiendas />} />
         <Route path="/tiendas/:id" element={<TiendaPublica />} />
-        <Route path="/solicitar" element={<Solicitar />} />
         <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/estado" element={<Estado />} />
         <Route path="/privacidad" element={<Privacidad />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route element={<RequiereSesion />}>
+          <Route path="/solicitar" element={<Solicitar />} />
+          <Route path="/comprador/mis-solicitudes/:id/editar" element={<Panel panel="comprador" seccion="Mis solicitudes" contenido={<SolicitudEditor />} />} />
           <Route path="/registro" element={<Registro />} />
           <Route path="/cuenta" element={<Cuenta />} />
           <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />

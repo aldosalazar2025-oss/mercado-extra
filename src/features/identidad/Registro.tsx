@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import Boton from "@/components/Boton";
 import Campo from "@/components/Campo";
 import { useAuth } from "@/features/auth/AuthContext";
+import { tomarDestino } from "@/lib/destino";
 import { comprimirImagen } from "@/lib/imagen";
 import { supabase } from "@/lib/supabase";
 import { esDniValido, esNombreValido, esTelefonoValido } from "@/lib/validaciones";
@@ -86,7 +87,7 @@ export default function Registro() {
         .update({ full_name: nombre.trim(), phone: telefono.trim() || null, consent_accepted_at: new Date().toISOString() })
         .eq("id", uid);
       await recargar();
-      ir("/cuenta", { replace: true });
+      ir(tomarDestino() ?? "/cuenta", { replace: true });
     } catch (err) {
       setErrorGeneral(err instanceof Error ? err.message : "Ocurrió un error. Inténtalo de nuevo.");
     } finally {

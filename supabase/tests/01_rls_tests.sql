@@ -564,6 +564,60 @@ select t.ok(t.falla($q$insert into public.categories (name, slug) values ('Falsa
 select t.anon();
 select t.ok(t.n($q$select 1 from public.categories where slug = 'juguetes'$q$) = 0, 'una categoría desactivada no se ve en el público');
 
+-- 12f. Etapa 8: solicitudes
+select t.como(t.u(1));
+select t.ok(t.afecta(format('update public.requests set title = %L, max_budget = 180 where id = %L', 'Zapatillas deportivas talla 40', t.u(307))) = 1, 'el comprador modifica su solicitud abierta');
+select t.ok(t.falla(format('update public.requests set title = %L where id = %L', 'Cambio tardío', t.u(301))), 'una solicitud con ofertas ya no se puede modificar');
+select t.ok(t.falla(format('update public.requests set max_budget = 1 where id = %L', t.u(301))), 'tampoco se puede bajar el presupuesto con ofertas recibidas');
+select t.ok(t.afecta(format('insert into public.request_images (request_id, path) values (%L, %L)', t.u(307), t.u(307)::text || '/ref-1.jpg')) = 1, 'se agrega una foto de referencia');
+select t.ok(t.falla(format('insert into public.request_images (request_id, path) values (%L, %L)', t.u(307), t.u(301)::text || '/ajena.jpg')), 'no se usan fotos de la carpeta de otra solicitud');
+select t.ok(t.afecta(format('insert into public.request_images (request_id, path) select %L, %L || ''/ref-'' || g || ''.jpg'' from generate_series(2, 5) g', t.u(307), t.u(307)::text)) = 4, 'hasta 5 fotos por solicitud');
+select t.ok(t.falla(format('insert into public.request_images (request_id, path) values (%L, %L)', t.u(307), t.u(307)::text || '/ref-6.jpg')), 'la sexta foto se rechaza');
+select t.como(t.u(2));
+select t.ok(t.falla(format('insert into public.request_images (request_id, path) values (%L, %L)', t.u(307), t.u(307)::text || '/hack.jpg')), 'otro comprador no agrega fotos a una solicitud ajena');
+select t.root();
+insert into storage.objects (bucket_id, name) values ('request-images', t.u(307)::text || '/ref-1.jpg');
+select t.como(t.u(2));
+select t.ok(t.afecta($q$delete from storage.objects where bucket_id = 'request-images'$q$) = 0, 'otro comprador no borra fotos de referencia ajenas');
+select t.como(t.u(1));
+select t.ok(t.afecta($q$delete from storage.objects where bucket_id = 'request-images' and name like '%/ref-1.jpg'$q$) = 1, 'el comprador borra sus propias fotos de referencia');
+
+-- límite de solicitudes abiertas
+select t.root();
+insert into public.requests (buyer_id, title, max_budget) select t.u(2), 'Solicitud de prueba ' || g, 10 from generate_series(1, 10) g;
+select t.como(t.u(2));
+select t.ok(t.falla(format('insert into public.requests (buyer_id, title, max_budget) values (%L, %L, 10)', t.u(2), 'La número once')), 'el comprador no puede tener más de 10 solicitudes abiertas');
+
+-- vencimiento y renovación
+select t.root();
+insert into public.requests (id, buyer_id, title, max_budget, status, expires_at) values
+  (t.u(320), t.u(1), 'Vence sin ofertas', 50, 'abierta', now() - interval '2 hours'),
+  (t.u(321), t.u(1), 'Vencida con ofertas', 50, 'con_ofertas', now() - interval '2 hours'),
+  (t.u(322), t.u(1), 'Renovada muchas veces', 50, 'vencida', now() - interval '2 hours'),
+  (t.u(323), t.u(1), 'Todavía vigente', 50, 'abierta', now() + interval '5 hours');
+update public.requests set renewed_count = 5 where id = t.u(322);
+select t.anon();
+select t.ok(t.falla('select public.vencer_solicitudes()'), 'un visitante no puede ejecutar el vencimiento');
+select t.como(t.u(1));
+select t.ok((select public.vencer_solicitudes()) >= 1, 'el vencimiento marca las solicitudes caducadas');
+select t.root();
+select t.ok((select status from public.requests where id = t.u(320)) = 'vencida', 'la solicitud abierta sin ofertas pasa a vencida');
+select t.ok((select status from public.requests where id = t.u(321)) = 'con_ofertas', 'una solicitud con ofertas no vence sola');
+select t.ok((select status from public.requests where id = t.u(323)) = 'abierta', 'una solicitud vigente sigue abierta');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(1) and type = 'solicitud_vencida' and payload ->> 'request_id' = t.u(320)::text), 'el comprador recibe el aviso de vencimiento');
+select t.como(t.u(1));
+select t.ok((select public.vencer_solicitudes()) = 0, 'ejecutar el vencimiento otra vez no repite avisos');
+select t.ok(t.falla(format('update public.requests set status = %L where id = %L', 'vencida', t.u(323))), 'no se puede dar por vencida una solicitud vigente');
+select t.ok(t.falla(format('update public.requests set status = %L where id = %L', 'abierta', t.u(322))), 'después de 5 renovaciones ya no se renueva');
+select t.ok(t.afecta(format('update public.requests set title = %L where id = %L', 'Vence sin ofertas (modificada)', t.u(320))) = 1, 'se puede modificar una solicitud vencida');
+select t.ok(t.falla(format('update public.requests set title = %L where id = %L', 'Intento', t.u(321))), 'una solicitud con ofertas no se modifica aunque haya pasado el plazo');
+select t.ok(t.afecta(format('update public.requests set status = %L where id = %L', 'abierta', t.u(320))) = 1, 'el comprador renueva la solicitud vencida');
+select t.ok(t.afecta(format('update public.requests set status = %L where id = %L', 'eliminada', t.u(320))) = 1, 'el comprador elimina su solicitud');
+select t.root();
+select t.ok((select renewed_count = 1 and expires_at > now() + interval '23 hours' from public.requests where id = t.u(320)), 'la renovación reinició las 24 horas');
+select t.como(t.u(1));
+select t.ok(t.n(format('select 1 from public.requests where id = %L and status = %L', t.u(320), 'eliminada')) = 1, 'la solicitud eliminada queda marcada y no se borra');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

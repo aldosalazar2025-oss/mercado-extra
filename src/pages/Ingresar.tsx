@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import Boton from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
+import { guardarDestino } from "@/lib/destino";
 
 export default function Ingresar() {
   const { configurado, cargando, session, iniciarConGoogle } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const ir = useNavigate();
+  const ubicacion = useLocation();
 
   useEffect(() => {
     if (!cargando && session) ir("/cuenta", { replace: true });
@@ -15,6 +17,7 @@ export default function Ingresar() {
 
   async function entrar() {
     setEnviando(true);
+    guardarDestino((ubicacion.state as { desde?: string } | null)?.desde);
     setError(await iniciarConGoogle());
     setEnviando(false);
   }
