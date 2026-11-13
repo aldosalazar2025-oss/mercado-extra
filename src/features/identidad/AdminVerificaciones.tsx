@@ -68,7 +68,7 @@ export default function AdminVerificaciones() {
     mutationFn: async (p: { fila: Fila; aprobar: boolean }) => {
       if (!supabase || !session) throw new Error("Sin sesión");
       if (!p.aprobar && motivo.trim().length < 5) throw new Error("Escribe el motivo del rechazo (mínimo 5 caracteres).");
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("identity_verifications")
         .update({
           status: p.aprobar ? "verificado" : "rechazado",
@@ -76,8 +76,9 @@ export default function AdminVerificaciones() {
           reviewed_by: session.user.id,
           reviewed_at: new Date().toISOString(),
         })
-        .eq("id", p.fila.id);
-      if (error) throw error;
+        .eq("id", p.fila.id)
+        .select("id");
+      if (error || !data || data.length === 0) throw new Error("No se pudo guardar el resultado.");
       await supabase.rpc("registrar_auditoria", {
         p_action: p.aprobar ? "verificar_identidad" : "rechazar_identidad",
         p_entity: "identity_verifications",

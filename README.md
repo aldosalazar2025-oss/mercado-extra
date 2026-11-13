@@ -63,3 +63,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 3. Primer administrador (después de entrar una vez con tu cuenta), en el SQL Editor de Supabase dev:
    `update public.profiles set is_admin = true where email = 'TU-CORREO@gmail.com';`
 4. Rutas nuevas: `/ingresar`, `/registro`, `/cuenta`, `/privacidad`, `/admin/verificacion-de-identidad` (solo administradores).
+
+## Etapa 6: tiendas y empleados
+1. Aplica en Supabase dev (SQL Editor) el archivo `supabase/migrations/20261112000800_tiendas_empleados.sql`.
+2. Rutas nuevas: `/vendedor/mis-tiendas`, `/vendedor/mis-tiendas/nueva`, `/vendedor/mis-tiendas/:id`, y en el panel admin la sección **Tiendas**.
+3. Las invitaciones se aceptan en **Mi cuenta** entrando con el mismo correo de Google al que se invitó.

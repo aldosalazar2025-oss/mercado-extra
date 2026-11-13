@@ -14,12 +14,16 @@ begin
   reset role;
   perform set_config('request.jwt.claim.sub', '', false);
   perform set_config('request.jwt.claim.role', '', false);
+  perform set_config('request.jwt.claim.email', '', false);
 end $$;
 create function t.como(uid uuid) returns void language plpgsql as $$
+declare e text;
 begin
   reset role;
+  select email into e from auth.users where id = uid;
   perform set_config('request.jwt.claim.sub', uid::text, false);
   perform set_config('request.jwt.claim.role', 'authenticated', false);
+  perform set_config('request.jwt.claim.email', coalesce(e, ''), false);
   set role authenticated;
 end $$;
 create function t.anon() returns void language plpgsql as $$
@@ -71,7 +75,9 @@ insert into auth.users (id, email, raw_user_meta_data) values
   (t.u(6), 'fito.productos@prueba.test',  '{"full_name":"Fito Productos"}'),
   (t.u(7), 'zoe.admin@prueba.test',       '{"full_name":"Zoe Admin"}'),
   (t.u(8), 'hugo.revocado@prueba.test',   '{"full_name":"Hugo Revocado"}'),
-  (t.u(9), 'ines.suspendida@prueba.test', '{"full_name":"Ines Suspendida"}');
+  (t.u(9), 'ines.suspendida@prueba.test', '{"full_name":"Ines Suspendida"}'),
+  (t.u(10), 'nuevo.empleado@prueba.test', '{"full_name":"Nora Nueva"}'),
+  (t.u(11), 'admin.tienda@prueba.test', '{"full_name":"Alma Admintienda"}');
 update public.profiles set is_admin = true where id = t.u(7);
 update public.profiles set status = 'suspendido' where id = t.u(9);
 
@@ -426,6 +432,70 @@ select t.como(t.u(7));
 select t.ok(t.afecta(format('update public.identity_verifications set status = %L, rejection_reason = %L, reviewed_by = %L, reviewed_at = now() where user_id = %L', 'rechazado', 'No coincide con la selfie', t.u(7), t.u(2))) = 1, 'administrador rechaza a un suplantador');
 select t.como(t.u(4));
 select t.ok(t.afecta(format('insert into public.identity_verifications (user_id, dni) values (%L, %L)', t.u(4), '44444444')) = 1, 'al rechazar, el DNI queda libre para su dueño real');
+
+-- 12d. Etapa 6: invitaciones, empleados y tiendas
+select t.root();
+create table t.inv as select id from public.store_members where invited_email = 'nuevo.empleado@prueba.test';
+grant select on t.inv to public;
+select t.como(t.u(10));
+select t.ok(t.n('select * from public.mis_invitaciones()') = 1, 'el invitado ve su invitación según el correo de su sesión');
+select t.como(t.u(4));
+select t.ok(t.n('select * from public.mis_invitaciones()') = 0, 'otro usuario no ve invitaciones ajenas');
+select t.ok(t.falla(format('select public.responder_invitacion(%L, true)', (select id from t.inv))), 'otro usuario no puede aceptar una invitación ajena');
+select t.ok(t.falla(format('update public.profiles set email = %L where id = %L', 'nuevo.empleado@prueba.test', t.u(4))), 'no se puede cambiar el correo del perfil para robar una invitación');
+select t.como(t.u(10));
+select t.ok(t.n('select 1 from public.conversations') = 0, 'antes de aceptar, el invitado no ve nada de la tienda');
+select t.ok(t.afecta($q$select public.responder_invitacion(id, true) from public.mis_invitaciones()$q$) = 1, 'el invitado acepta la invitación');
+select t.ok(t.n('select 1 from public.conversations') = 1, 'tras aceptar, el empleado accede según su rol');
+select t.ok(t.n('select * from public.mis_invitaciones()') = 0, 'la invitación aceptada desaparece de pendientes');
+select t.root();
+select t.ok((select user_id = t.u(10) and status = 'activo' from public.store_members where store_id = t.u(101) and invited_email = 'nuevo.empleado@prueba.test'), 'el empleado queda activo y vinculado a su cuenta');
+insert into public.store_members (store_id, user_id, role_code, status) values (t.u(101), t.u(11), 'administrador_tienda', 'activo');
+
+select t.como(t.u(11));
+select t.ok(t.falla(format('insert into public.store_members (store_id, invited_email, role_code) values (%L, %L, %L)', t.u(101), 'otro.admin@prueba.test', 'administrador_tienda')), 'un administrador de tienda no crea otros administradores');
+select t.ok(t.falla(format('insert into public.store_members (store_id, invited_email, role_code, extra_permissions) values (%L, %L, %L, %L)', t.u(101), 'planes@prueba.test', 'vendedor', '{gestionar_planes}')), 'un administrador de tienda no concede permisos de planes');
+select t.ok(t.falla(format('insert into public.store_members (store_id, invited_email, role_code, extra_permissions) values (%L, %L, %L, %L)', t.u(101), 'raro@prueba.test', 'vendedor', '{volar}')), 'un permiso inexistente se rechaza');
+select t.ok(t.falla(format('update public.store_members set extra_permissions = %L where store_id = %L and user_id = %L', '{gestionar_planes}', t.u(101), t.u(11))), 'nadie se concede permisos a sí mismo');
+select t.ok(t.afecta(format('insert into public.store_members (store_id, invited_email, role_code, extra_permissions) values (%L, %L, %L, %L)', t.u(101), 'Vendedor.Nuevo@Prueba.test', 'vendedor', '{ver_estadisticas}')) = 1, 'un administrador de tienda invita vendedores');
+select t.ok(t.afecta(format('update public.stores set description = %L where id = %L', 'Ropa para toda la familia', t.u(101))) = 1, 'administrador de tienda edita los datos de la tienda');
+select t.root();
+select t.ok(exists (select 1 from public.store_members where invited_email = 'vendedor.nuevo@prueba.test'), 'los correos invitados se guardan en minúsculas');
+
+select t.como(t.u(3));
+select t.ok(t.afecta(format('insert into public.store_members (store_id, invited_email, role_code) values (%L, %L, %L)', t.u(101), 'segundo.admin@prueba.test', 'administrador_tienda')) = 1, 'el propietario crea administradores de tienda');
+select t.ok(t.afecta(format('update public.store_members set status = %L where store_id = %L and user_id = %L', 'revocado', t.u(101), t.u(5))) = 1, 'el propietario revoca a un empleado');
+select t.como(t.u(5));
+select t.ok(t.n('select 1 from public.requests') = 0, 'el empleado revocado pierde el acceso al instante');
+select t.como(t.u(3));
+select t.ok(t.afecta(format('update public.store_members set status = %L where store_id = %L and user_id = %L', 'activo', t.u(101), t.u(5))) = 1, 'el propietario reactiva al empleado');
+select t.como(t.u(5));
+select t.ok(t.n('select 1 from public.requests') >= 1, 'el empleado reactivado recupera el acceso');
+
+select t.como(t.u(4));
+select t.ok(t.n(format('select 1 from public.stores where owner_id = %L', t.u(4))) = 2, 'un propietario administra varias tiendas');
+select t.como(t.u(10));
+select t.ok(t.n(format('select 1 from public.stores where id = %L', t.u(103))) = 0, 'un empleado no ve las tiendas pendientes de otro propietario');
+select t.ok(t.afecta(format('update public.products set price = 1 where store_id = %L', t.u(102))) = 0, 'un empleado de una tienda no toca los productos de otra');
+
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.stores set status = %L, rejection_reason = %L where id = %L', 'rechazada', 'Falta la dirección', t.u(104))) = 1, 'administrador rechaza una tienda con motivo');
+select t.como(t.u(2));
+select t.ok((select rejection_reason from public.stores where id = t.u(104)) = 'Falta la dirección', 'el dueño ve por qué fue rechazada');
+select t.ok(t.falla(format('update public.stores set status = %L where id = %L', 'aprobada', t.u(104))), 'el dueño no puede aprobarse a sí mismo');
+select t.ok(t.afecta(format('update public.stores set status = %L, rejection_reason = null, address = %L where id = %L', 'pendiente', 'Jr. Lima 123 (prueba)', t.u(104))) = 1, 'el dueño corrige y reenvía la tienda rechazada');
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.stores set status = %L where id = %L', 'aprobada', t.u(104))) = 1, 'administrador aprueba la tienda');
+select t.anon();
+select t.ok(t.n(format('select 1 from public.stores where id = %L', t.u(104))) = 1, 'la tienda aprobada aparece en el público');
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.stores set status = %L, rejection_reason = %L where id = %L', 'suspendida', 'Denuncias comprobadas', t.u(102))) = 1, 'administrador suspende una tienda');
+select t.anon();
+select t.ok(t.n(format('select 1 from public.products where store_id = %L', t.u(102))) = 0, 'una tienda suspendida desaparece del catálogo público');
+select t.como(t.u(4));
+select t.ok(t.falla(format('update public.stores set status = %L where id = %L', 'aprobada', t.u(102))), 'el dueño no puede reactivar una tienda suspendida');
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.stores set status = %L, rejection_reason = null where id = %L', 'aprobada', t.u(102))) = 1, 'administrador reactiva la tienda');
 
 -- 13. Estructura y catálogos
 select t.root();

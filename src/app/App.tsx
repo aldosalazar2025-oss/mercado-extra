@@ -14,6 +14,8 @@ import { RequiereAdmin, RequiereSesion } from "@/features/auth/Rutas";
 import Registro from "@/features/identidad/Registro";
 import Cuenta from "@/features/identidad/Cuenta";
 import Privacidad from "@/pages/Privacidad";
+import NuevaTienda from "@/features/tiendas/NuevaTienda";
+import TiendaDetalle from "@/features/tiendas/TiendaDetalle";
 
 function Estructura() {
   return (
@@ -47,6 +49,8 @@ export default function App() {
           <Route path="/registro" element={<Registro />} />
           <Route path="/cuenta" element={<Cuenta />} />
           <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />
+          <Route path="/vendedor/mis-tiendas/nueva" element={<Panel panel="vendedor" seccion="Mis tiendas" contenido={<NuevaTienda />} />} />
+          <Route path="/vendedor/mis-tiendas/:tiendaId" element={<Panel panel="vendedor" seccion="Mis tiendas" contenido={<TiendaDetalle />} />} />
           <Route path="/vendedor/:seccion?" element={<Panel panel="vendedor" />} />
           <Route element={<RequiereAdmin />}>
             <Route path="/admin/:seccion?" element={<Panel panel="admin" />} />

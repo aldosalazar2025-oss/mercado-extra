@@ -1,6 +1,10 @@
+import type { ReactNode } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
-import { paneles, slug, type PanelId } from "./config";
+import AdminTiendas from "@/features/tiendas/AdminTiendas";
+import MisTiendas from "@/features/tiendas/MisTiendas";
+import { useMisPermisos } from "@/features/tiendas/hooks";
+import { paneles, permisoSeccion, slug, type PanelId } from "./config";
 
 const resumenDemo = [
   { etiqueta: "Solicitudes abiertas", valor: "3" },
@@ -8,11 +12,36 @@ const resumenDemo = [
   { etiqueta: "Compras completadas", valor: "12" },
 ];
 
-export default function Panel({ panel }: { panel: PanelId }) {
-  const { titulo, secciones } = paneles[panel];
+function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
+  if (panel === "admin" && seccion === "Verificación de identidad") return <AdminVerificaciones />;
+  if (panel === "admin" && seccion === "Tiendas") return <AdminTiendas />;
+  if (panel === "vendedor" && seccion === "Mis tiendas") return <MisTiendas />;
+  if (panel === "vendedor" && seccion === "Empleados y permisos") return <MisTiendas modo="empleados" />;
+  return null;
+}
+
+type Props = { panel: PanelId; seccion?: string; contenido?: ReactNode };
+
+export default function Panel({ panel, seccion: seccionFija, contenido }: Props) {
+  const { titulo, secciones: todas } = paneles[panel];
   const { seccion } = useParams();
-  const actual = secciones.find((s) => slug(s) === seccion) ?? secciones[0];
-  const esResumen = actual === secciones[0];
+  const misPermisos = useMisPermisos(panel === "vendedor");
+  // En el panel de vendedor el menú solo muestra lo que la persona puede usar en alguna de sus tiendas.
+  const visibles = (s: string) => {
+    if (panel !== "vendedor") return true;
+    const req = permisoSeccion[s] ?? null;
+    return req === null || (misPermisos.data?.has(req) ?? false);
+  };
+  const secciones = todas.filter(visibles);
+  const pedida = seccionFija ?? todas.find((s) => slug(s) === seccion) ?? todas[0];
+  const sinAcceso = panel === "vendedor" && !misPermisos.isLoading && !visibles(pedida);
+  const actual = pedida;
+  const esResumen = !contenido && actual === todas[0];
+  const real = sinAcceso ? (
+    <p className="rounded-xl bg-white p-6 text-suave">Tu rol en tus tiendas no incluye esta sección. Si la necesitas, pídele al propietario que te dé el permiso.</p>
+  ) : (
+    contenido ?? contenidoDe(panel, actual)
+  );
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 md:grid-cols-[240px_1fr]">
@@ -33,21 +62,19 @@ export default function Panel({ panel }: { panel: PanelId }) {
         </ul>
       </nav>
 
-      <main className="space-y-4">
+      <main className="min-w-0 space-y-4">
         <h1 className="font-display text-3xl font-extrabold text-pino">{actual}</h1>
         {esResumen && (
           <ul className="grid gap-3 sm:grid-cols-3">
             {resumenDemo.map((r) => (
               <li key={r.etiqueta} className="rounded-xl border border-borde bg-white p-4">
                 <p className="text-3xl font-extrabold text-pino">{r.valor}</p>
-                <p className="text-sm text-suave">{r.etiqueta}</p>
+                <p className="text-sm text-suave">{r.etiqueta} (ejemplo)</p>
               </li>
             ))}
           </ul>
         )}
-        {panel === "admin" && actual === "Verificación de identidad" ? (
-          <AdminVerificaciones />
-        ) : (
+        {real ?? (
           <p className="rounded-xl bg-white p-6 text-suave">
             Vista previa del diseño con datos de ejemplo. Esta sección se vuelve funcional en una etapa posterior.
           </p>

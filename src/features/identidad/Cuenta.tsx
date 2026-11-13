@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import Boton, { clasesBoton } from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
+import Invitaciones from "@/features/tiendas/Invitaciones";
 
 const textos = {
   pendiente: { titulo: "Verificación pendiente", clase: "bg-maiz-suave", detalle: "Estamos revisando tus datos. Mientras tanto puedes usar Mercado Extra con normalidad." },
@@ -19,6 +20,8 @@ export default function Cuenta() {
         <p className="font-bold">{perfil?.full_name || "Sin nombre registrado"}</p>
         <p className="text-suave">{perfil?.email ?? session?.user.email}</p>
       </section>
+
+      <Invitaciones />
 
       {!verificacion && (
         <section className="space-y-2 rounded-xl bg-maiz-suave p-4">
@@ -40,6 +43,7 @@ export default function Cuenta() {
       )}
 
       <div className="flex flex-wrap gap-3">
+        <Link to="/vendedor/mis-tiendas" className={clasesBoton("contorno")}>Mis tiendas</Link>
         {perfil?.is_admin && <Link to="/admin" className={clasesBoton("contorno")}>Panel administrativo</Link>}
         <Boton variante="contorno" onClick={() => void cerrarSesion()}>Cerrar sesión</Boton>
       </div>
