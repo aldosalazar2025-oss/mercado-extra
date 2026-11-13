@@ -103,7 +103,8 @@ insert into public.requests (id, buyer_id, title, category_id, max_budget, statu
   (t.u(305), t.u(1), 'Abierta pero con plazo pasado', (select id from public.categories where slug = 'ropa'), 100, 'abierta', now() - interval '1 hour'),
   (t.u(306), t.u(1), 'Abierta para probar permisos', (select id from public.categories where slug = 'ropa'), 100, 'abierta', now() + interval '10 hours');
 insert into public.request_matches (request_id, store_id) values
-  (t.u(301), t.u(101)), (t.u(305), t.u(101)), (t.u(306), t.u(101));
+  (t.u(301), t.u(101)), (t.u(305), t.u(101)), (t.u(306), t.u(101))
+  on conflict do nothing;
 
 insert into public.offers (id, request_id, store_id, created_by) values
   (t.u(401), t.u(302), t.u(101), t.u(3)), (t.u(402), t.u(303), t.u(101), t.u(3));
@@ -617,6 +618,86 @@ select t.root();
 select t.ok((select renewed_count = 1 and expires_at > now() + interval '23 hours' from public.requests where id = t.u(320)), 'la renovación reinició las 24 horas');
 select t.como(t.u(1));
 select t.ok(t.n(format('select 1 from public.requests where id = %L and status = %L', t.u(320), 'eliminada')) = 1, 'la solicitud eliminada queda marcada y no se borra');
+
+-- 12g. Etapa 9: coincidencias y notificaciones
+select t.como(t.u(1));
+select t.ok(t.afecta(format('insert into public.requests (id, buyer_id, title, category_id, max_budget) values (%L, %L, %L, (select id from public.categories where slug = %L), 200)', t.u(330), t.u(1), 'Saco negro talla M', 'ropa')) = 1, 'comprador publica una solicitud de ropa');
+select t.root();
+select t.ok((select array_agg(store_id) from public.request_matches where request_id = t.u(330)) = array[t.u(101)], 'la solicitud de ropa llega solo a la tienda de ropa');
+select t.ok((select score >= 3 and 'producto' = any(matched_by) and 'categoria' = any(matched_by) and 'etiqueta' = any(matched_by) from public.request_matches where request_id = t.u(330) and store_id = t.u(101)), 'el puntaje refleja categoría, producto y etiqueta');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(3) and type = 'solicitud_nueva' and payload ->> 'request_id' = t.u(330)::text), 'el propietario es notificado');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(5) and type = 'solicitud_nueva' and payload ->> 'request_id' = t.u(330)::text), 'el empleado con permiso de ver solicitudes es notificado');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(11) and type = 'solicitud_nueva' and payload ->> 'request_id' = t.u(330)::text), 'el administrador de tienda es notificado');
+select t.ok(not exists (select 1 from public.notifications where payload ->> 'request_id' = t.u(330)::text and user_id in (t.u(6), t.u(8), t.u(4), t.u(1), t.u(2))), 'no se avisa al encargado de productos, al revocado, a otras tiendas ni al comprador');
+
+select t.como(t.u(1));
+select t.ok(t.afecta(format('insert into public.requests (id, buyer_id, title, category_id, max_budget) values (%L, %L, %L, (select id from public.categories where slug = %L), 80)', t.u(331), t.u(1), 'Llave inglesa de 12 pulgadas', 'ferreteria')) = 1, 'comprador publica una solicitud de ferretería');
+select t.ok(t.afecta(format('insert into public.requests (id, buyer_id, title, category_id, max_budget) values (%L, %L, %L, (select id from public.categories where slug = %L), 60)', t.u(332), t.u(1), 'Arroz extra', 'abarrotes')) = 1, 'comprador publica una solicitud de abarrotes');
+select t.ok(t.afecta(format('insert into public.requests (id, buyer_id, title, category_id, max_budget) values (%L, %L, %L, (select id from public.categories where slug = %L), 90)', t.u(333), t.u(1), 'Chaleco azul', 'ropa')) = 1, 'comprador publica otra solicitud de ropa');
+select t.root();
+select t.ok((select array_agg(store_id) from public.request_matches where request_id = t.u(331)) = array[t.u(102)], 'la solicitud de ferretería llega solo a la ferretería');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(4) and payload ->> 'request_id' = t.u(331)::text) and not exists (select 1 from public.notifications where user_id = t.u(3) and payload ->> 'request_id' = t.u(331)::text), 'la tienda de ropa no recibe la solicitud de ferretería');
+select t.ok(not exists (select 1 from public.request_matches where request_id = t.u(332)), 'una solicitud sin tiendas relacionadas no llega a nadie');
+select t.ok((select score = 1 and matched_by = array['categoria'] from public.request_matches where request_id = t.u(333) and store_id = t.u(101)), 'sin productos parecidos, solo cuenta la categoría');
+
+-- una tienda que suma una categoría empieza a recibir las solicitudes abiertas de esa categoría
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.requests where id = %L', t.u(332))) = 0, 'antes, la tienda de Beto no ve la solicitud de abarrotes');
+select t.ok(t.afecta(format('insert into public.store_categories (store_id, category_id) values (%L, (select id from public.categories where slug = %L))', t.u(104), 'abarrotes')) = 1, 'la tienda agrega la categoría abarrotes');
+select t.ok(t.n(format('select 1 from public.requests where id = %L', t.u(332))) = 1, 'ahora sí recibe la solicitud de abarrotes');
+select t.root();
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(2) and payload ->> 'request_id' = t.u(332)::text), 'y es notificada');
+
+-- cambiar la categoría reasigna las tiendas
+select t.como(t.u(1));
+select t.ok(t.afecta(format('update public.requests set category_id = (select id from public.categories where slug = %L) where id = %L', 'ferreteria', t.u(330))) = 1, 'el comprador corrige la categoría de su solicitud');
+select t.root();
+select t.ok((select array_agg(store_id) from public.request_matches where request_id = t.u(330)) = array[t.u(102)], 'las coincidencias se recalculan con la nueva categoría');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(4) and payload ->> 'request_id' = t.u(330)::text), 'la nueva tienda destinataria es notificada');
+
+-- descartar solicitudes
+select t.como(t.u(3));
+select t.ok(t.afecta(format('update public.request_matches set dismissed = true where request_id = %L', t.u(333))) = 1, 'la tienda descarta una solicitud');
+select t.ok(t.n(format('select 1 from public.requests where id = %L', t.u(333))) = 0, 'la solicitud descartada deja de verse');
+select t.como(t.u(4));
+select t.ok(t.afecta(format('update public.request_matches set dismissed = true where request_id = %L', t.u(333))) = 0, 'otra tienda no puede descartar por la primera');
+select t.ok(t.falla(format('update public.request_matches set score = 99 where request_id = %L', t.u(331))), 'la tienda no puede cambiar el puntaje');
+select t.ok(t.falla(format('insert into public.request_matches (request_id, store_id) values (%L, %L)', t.u(332), t.u(102))), 'las tiendas no crean coincidencias a mano');
+select t.como(t.u(1));
+select t.ok(t.falla(format('select public.emparejar_solicitud(%L)', t.u(331))), 'los usuarios no pueden ejecutar el emparejamiento');
+select t.ok(t.n('select 1 from public.request_matches') = 0, 'el comprador no ve las coincidencias');
+
+-- tope diario de avisos por tienda
+select t.root();
+insert into public.notifications (user_id, type, title, payload)
+  select t.u(4), 'solicitud_nueva', 'Relleno', jsonb_build_object('store_id', t.u(102)) from generate_series(1, 30);
+select t.como(t.u(1));
+select t.ok(t.afecta(format('insert into public.requests (id, buyer_id, title, category_id, max_budget) values (%L, %L, %L, (select id from public.categories where slug = %L), 50)', t.u(334), t.u(1), 'Destornillador plano', 'ferreteria')) = 1, 'otra solicitud de ferretería');
+select t.root();
+select t.ok(exists (select 1 from public.request_matches where request_id = t.u(334) and store_id = t.u(102) and notified_at is null), 'superado el tope diario, la solicitud llega pero sin aviso');
+select t.ok(not exists (select 1 from public.notifications where payload ->> 'request_id' = t.u(334)::text), 'no se generan avisos de más');
+
+-- aprobar una tienda revisa las solicitudes abiertas
+insert into public.store_categories (store_id, category_id) values (t.u(103), (select id from public.categories where slug = 'ropa'));
+select t.ok(not exists (select 1 from public.request_matches where store_id = t.u(103)), 'una tienda pendiente no recibe solicitudes aunque tenga categorías');
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.stores set status = %L where id = %L', 'aprobada', t.u(103))) = 1, 'la administración aprueba la tienda pendiente');
+select t.root();
+select t.ok(exists (select 1 from public.request_matches where request_id = t.u(333) and store_id = t.u(103)), 'al aprobarla, recibe las solicitudes abiertas de su categoría');
+
+-- tope de destinatarios por solicitud
+insert into public.stores (owner_id, name, status, offers_pickup) select t.u(3), 'Tienda masiva ' || g, 'aprobada', true from generate_series(1, 25) g;
+insert into public.store_categories (store_id, category_id) select id, (select id from public.categories where slug = 'ropa') from public.stores where name like 'Tienda masiva %';
+select t.ok((select count(*) from public.request_matches where request_id = t.u(333)) = 20, 'una solicitud llega como máximo a 20 tiendas');
+select t.ok((select max(c) from (select count(*) as c from public.request_matches group by request_id) x) <= 20, 'ninguna solicitud supera el tope de destinatarios');
+
+-- lectura de notificaciones
+select t.como(t.u(3));
+select t.ok(t.n($q$select 1 from public.notifications where type = 'solicitud_nueva'$q$) >= 1, 'el vendedor ve sus avisos');
+select t.ok(t.afecta('update public.notifications set read_at = now() where read_at is null') >= 1, 'el vendedor marca sus avisos como leídos');
+select t.ok(t.falla($q$update public.notifications set title = 'Alterado'$q$), 'no se altera el contenido de los avisos');
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.notifications where user_id = %L', t.u(3))) = 0, 'nadie lee los avisos de otro usuario');
 
 -- 13. Estructura y catálogos
 select t.root();

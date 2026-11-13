@@ -78,3 +78,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001000_solicitudes.sql`.
 2. Rutas nuevas: `/solicitar` (pide iniciar sesión), `/comprador/mis-solicitudes` y `/comprador/mis-solicitudes/:id/editar`.
 3. Opcional: vencimiento automático con `supabase/OPCIONAL_pg_cron.sql`.
+
+## Etapa 9: coincidencias y notificaciones
+1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001100_coincidencias.sql`.
+2. Para emparejar solicitudes que ya existían, ejecuta una vez: `select public.emparejar_solicitud(id) from public.requests where status in ('abierta','con_ofertas');`
+3. Rutas nuevas: `/notificaciones` y, en el panel de vendedor, **Solicitudes recibidas**.

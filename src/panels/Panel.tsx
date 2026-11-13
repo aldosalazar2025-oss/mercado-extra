@@ -3,6 +3,7 @@ import { Link, NavLink, useParams } from "react-router-dom";
 import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
 import AdminCategorias from "@/features/catalogo/AdminCategorias";
 import AdminProductos from "@/features/catalogo/AdminProductos";
+import SolicitudesRecibidas from "@/features/solicitudes/SolicitudesRecibidas";
 import MisSolicitudes from "@/features/solicitudes/MisSolicitudes";
 import MisProductos from "@/features/catalogo/MisProductos";
 import AdminTiendas from "@/features/tiendas/AdminTiendas";
@@ -22,6 +23,7 @@ function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
   if (panel === "comprador" && seccion === "Mis solicitudes") return <MisSolicitudes />;
   if (panel === "admin" && seccion === "Categorías") return <AdminCategorias />;
   if (panel === "admin" && seccion === "Productos") return <AdminProductos />;
+  if (panel === "vendedor" && seccion === "Solicitudes recibidas") return <SolicitudesRecibidas />;
   if (panel === "vendedor" && seccion === "Mis productos") return <MisProductos />;
   if (panel === "vendedor" && seccion === "Mis tiendas") return <MisTiendas />;
   if (panel === "vendedor" && seccion === "Empleados y permisos") return <MisTiendas modo="empleados" />;

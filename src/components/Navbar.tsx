@@ -3,6 +3,8 @@ import { Link, NavLink } from "react-router-dom";
 import Logo from "./Logo";
 import { clasesBoton } from "./Boton";
 import { useAuth } from "@/features/auth/AuthContext";
+import Campana from "@/features/notificaciones/Campana";
+import LimiteDeErrores from "./LimiteDeErrores";
 
 const enlaces = [
   { to: "/productos", texto: "Productos" },
@@ -29,7 +31,8 @@ export default function Navbar() {
           <a href="/#como-funciona" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja">Cómo funciona</a>
           {session ? (
             <>
-              <Link to="/cuenta" className={`${clasesBoton("contorno")} ml-2`}>Mi cuenta</Link>
+              <LimiteDeErrores discreto><Campana /></LimiteDeErrores>
+              <Link to="/cuenta" className={`${clasesBoton("contorno")} ml-1`}>Mi cuenta</Link>
               <button type="button" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja" onClick={() => void cerrarSesion()}>Salir</button>
             </>
           ) : (
@@ -38,9 +41,11 @@ export default function Navbar() {
           <Link to="/solicitar" className={clasesBoton("primario")}>Publicar solicitud</Link>
         </nav>
 
+        <div className="flex items-center gap-1 md:hidden">
+          <LimiteDeErrores discreto><Campana /></LimiteDeErrores>
         <button
           type="button"
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-borde md:hidden"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-borde"
           aria-expanded={abierto}
           aria-controls="menu-movil"
           aria-label={abierto ? "Cerrar menú" : "Abrir menú"}
@@ -50,6 +55,7 @@ export default function Navbar() {
             {abierto ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
           </svg>
         </button>
+        </div>
       </div>
 
       {abierto && (

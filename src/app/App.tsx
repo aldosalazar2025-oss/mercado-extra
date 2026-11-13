@@ -1,5 +1,7 @@
 import { Outlet, Route, Routes } from "react-router-dom";
 import Navbar from "@/components/Navbar";
+import LimiteDeErrores from "@/components/LimiteDeErrores";
+import NotificacionesEnVivo from "@/features/notificaciones/NotificacionesEnVivo";
 import Pie from "@/components/Pie";
 import Inicio from "@/pages/Inicio";
 import Productos from "@/pages/Productos";
@@ -14,6 +16,7 @@ import { RequiereAdmin, RequiereSesion } from "@/features/auth/Rutas";
 import Registro from "@/features/identidad/Registro";
 import Cuenta from "@/features/identidad/Cuenta";
 import Privacidad from "@/pages/Privacidad";
+import Notificaciones from "@/pages/Notificaciones";
 import ProductoDetalle from "@/pages/ProductoDetalle";
 import TiendaPublica from "@/pages/TiendaPublica";
 import ProductoEditor from "@/features/catalogo/ProductoEditor";
@@ -27,10 +30,13 @@ function Estructura() {
       <a href="#contenido" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-maiz focus:px-4 focus:py-2 focus:font-bold">
         Saltar al contenido
       </a>
+      <LimiteDeErrores discreto><NotificacionesEnVivo /></LimiteDeErrores>
       <Navbar />
       <AvisoRegistro />
       <div id="contenido">
-        <Outlet />
+        <LimiteDeErrores>
+          <Outlet />
+        </LimiteDeErrores>
       </div>
       <Pie />
     </>
@@ -51,6 +57,7 @@ export default function App() {
         <Route path="/privacidad" element={<Privacidad />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route element={<RequiereSesion />}>
+          <Route path="/notificaciones" element={<Notificaciones />} />
           <Route path="/solicitar" element={<Solicitar />} />
           <Route path="/comprador/mis-solicitudes/:id/editar" element={<Panel panel="comprador" seccion="Mis solicitudes" contenido={<SolicitudEditor />} />} />
           <Route path="/registro" element={<Registro />} />

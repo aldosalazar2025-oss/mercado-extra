@@ -9,8 +9,9 @@
 | 5. Registro y autenticación | Cerrada | Ingreso con Google confirmado por el usuario; 199 pruebas de base de datos | Sí |
 | 6. Tiendas y empleados | Cerrada | Probada por el usuario en pantalla (invitaciones, permisos, menú) | Sí |
 | 7. Catálogo | Cerrada | 268 pruebas de base de datos; aprobada por el usuario | Sí |
-| 8. Solicitudes de compradores | Código listo, falta aplicar migración 0010 | Compilación OK; 294 pruebas de base de datos. Sin probar en pantalla | Pendiente |
-| 9 a 19 | No iniciadas | - | - |
+| 8. Solicitudes de compradores | Cerrada | 294 pruebas de base de datos; aprobada por el usuario | Sí |
+| 9. Coincidencias y notificaciones | Código listo, falta aplicar migración 0011 | Compilación OK; 334 pruebas de base de datos. Sin probar en pantalla | Pendiente |
+| 10 a 19 | No iniciadas | - | - |
 
 ## Etapa 4
 Hecho: 6 migraciones (38 tablas, 83 políticas RLS, 6 buckets, catálogos), funciones de permisos por tienda, protección de campos sensibles, historial de ofertas inmutable, lectura de chat por el administrador con motivo y auditoría.
@@ -46,3 +47,10 @@ Reglas en base de datos (migración 0010): el contenido solo se modifica mientra
 Vencimiento: la web llama a vencer_solicitudes() al abrir "Mis solicitudes"; opcionalmente se programa cada 5 min con pg_cron (supabase/OPCIONAL_pg_cron.sql, no probado).
 Pendiente: coincidencias con tiendas y campana de notificaciones (Etapa 9); si se cambia la categoría de una solicitud, las coincidencias se recalculan en la Etapa 9; ver y elegir ofertas (Etapa 10).
 NO probado: pantallas en navegador, subida real de fotos.
+
+## Etapa 9
+Hecho: coincidencia solicitud-tienda por categoría (declarada o presente en sus productos publicados) con puntaje por producto y etiquetas; la tienda del propio comprador no recibe su solicitud; tope de 20 tiendas por solicitud y de 30 avisos por tienda cada 24 h; recálculo al editar la solicitud, renovarla, aprobar una tienda o sumar categorías; avisos solo a propietario y empleados con permiso de ver solicitudes; notificaciones internas con campana, contador, página /notificaciones y tiempo real; "Solicitudes recibidas" para el vendedor con fotos de referencia y opción de descartar.
+Solicitudes anteriores a esta migración no se emparejan solas: ejecutar una vez en el SQL Editor `select public.emparejar_solicitud(id) from public.requests where status in ('abierta','con_ofertas');`
+Límites conocidos: publicar un producto nuevo no re-evalúa solicitudes ya abiertas (sí lo hace sumar categorías o aprobar la tienda); coincidencia por palabras sin tolerar errores de escritura ni tildes; el botón "Enviar oferta" está desactivado hasta la Etapa 10.
+NO probado: pantallas en navegador, tiempo real con Supabase real.
+Corrección Etapa 9 (reportada por el usuario): pantalla en blanco al iniciar sesión. Causa: las dos campanas (escritorio y celular) abrían un canal de tiempo real con el mismo nombre y la segunda lanzaba un error que desmontaba toda la aplicación. Solución: el tiempo real se abre una sola vez (NotificacionesEnVivo), con nombre único y sin poder fallar hacia arriba; se añadió LimiteDeErrores (la campana, el tiempo real y cada página se aíslan; si algo falla se muestra un aviso en vez de una pantalla en blanco). Verificado con la librería real de Supabase en Node; sin probar en navegador.
