@@ -76,3 +76,29 @@ export function useMisPermisos(habilitado: boolean) {
     },
   });
 }
+
+// Permisos de la persona en cada una de sus tiendas (tienda -> conjunto de permisos).
+export function usePermisosPorTienda() {
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  return useQuery({
+    queryKey: ["permisos-por-tienda", uid],
+    enabled: Boolean(uid && supabase),
+    queryFn: async () => {
+      const mapa = new Map<string, Set<string>>();
+      if (!supabase || !uid) return mapa;
+      const [m, rp] = await Promise.all([
+        supabase.from("store_members").select("store_id,role_code,extra_permissions").eq("user_id", uid).eq("status", "activo"),
+        supabase.from("role_permissions").select("role_code,permission_code"),
+      ]);
+      const porRol = new Map<string, string[]>();
+      (rp.data ?? []).forEach((x) => porRol.set(x.role_code as string, [...(porRol.get(x.role_code as string) ?? []), x.permission_code as string]));
+      (m.data ?? []).forEach((f) => {
+        const set = new Set<string>((f.extra_permissions as string[]) ?? []);
+        (porRol.get(f.role_code as string) ?? []).forEach((p) => set.add(p));
+        mapa.set(f.store_id as string, set);
+      });
+      return mapa;
+    },
+  });
+}

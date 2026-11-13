@@ -497,13 +497,80 @@ select t.ok(t.falla(format('update public.stores set status = %L where id = %L',
 select t.como(t.u(7));
 select t.ok(t.afecta(format('update public.stores set status = %L, rejection_reason = null where id = %L', 'aprobada', t.u(102))) = 1, 'administrador reactiva la tienda');
 
+-- 12e. Etapa 7: catálogo
+select t.root();
+update public.stores set latitude = -12.8400, longitude = -74.5700 where id = t.u(101);
+update public.stores set latitude = -12.9000, longitude = -74.6500 where id = t.u(102);
+select t.anon();
+select t.ok(t.n($q$select * from public.buscar_productos(p_texto => 'saco')$q$) = 1, 'la búsqueda por texto encuentra el producto');
+select t.ok(t.n($q$select * from public.buscar_productos(p_texto => 'xyzabc')$q$) = 0, 'una búsqueda sin coincidencias no devuelve nada');
+select t.ok(t.n($q$select * from public.buscar_productos(p_texto => '%')$q$) = 0, 'los comodines del usuario se tratan como texto');
+select t.ok(t.n(format('select * from public.buscar_productos(p_categoria => %L)', (select id from public.categories where slug = 'ferreteria'))) = 1, 'filtro por categoría');
+select t.ok(t.n($q$select * from public.buscar_productos(p_precio_max => 100)$q$) = 1, 'filtro por precio máximo');
+select t.ok(t.n($q$select * from public.buscar_productos(p_precio_min => 200)$q$) = 1, 'filtro por precio mínimo');
+select t.ok((select name from public.buscar_productos(p_orden => 'precio_asc') limit 1) = 'Polo nuevo', 'orden por menor precio');
+select t.ok((select name from public.buscar_productos(p_orden => 'precio_desc') limit 1) = 'Taladro percutor', 'orden por mayor precio');
+select t.ok(t.n($q$select * from public.buscar_productos(p_limite => 1, p_desde => 1)$q$) = 1, 'la paginación funciona');
+select t.ok(t.n($q$select * from public.buscar_productos(p_lat => -12.8401, p_lng => -74.5701, p_radio_km => 5)$q$) = 2, 'filtro por distancia: solo lo cercano');
+select t.ok(t.n($q$select * from public.buscar_productos(p_lat => -12.8401, p_lng => -74.5701, p_radio_km => 20)$q$) = 3, 'filtro por distancia: radio mayor incluye más tiendas');
+select t.ok((select store_name from public.buscar_productos(p_lat => -12.8401, p_lng => -74.5701, p_orden => 'cerca') limit 1) like 'Moda Andina%', 'orden por cercanía');
+select t.ok((select distancia_km from public.buscar_productos(p_lat => -12.8401, p_lng => -74.5701, p_texto => 'saco') limit 1) < 0.1, 'la distancia calculada es razonable');
+select t.ok(not exists (select 1 from public.buscar_productos() where name = 'Producto oculto'), 'un producto oculto por su tienda no sale en el catálogo');
+
+-- moderación por la administración
+select t.root();
+update public.products set admin_hidden = true, admin_hidden_reason = 'Producto prohibido (prueba)' where id = t.u(201);
+select t.anon();
+select t.ok(t.n(format('select 1 from public.products where id = %L', t.u(201))) = 0, 'un producto retirado por la administración desaparece del público');
+select t.como(t.u(3));
+select t.ok(t.n(format('select 1 from public.products where id = %L', t.u(201))) = 1, 'la tienda sigue viendo su producto retirado');
+select t.ok(t.falla(format('update public.products set admin_hidden = false where id = %L', t.u(201))), 'la tienda no puede volver a publicar un producto retirado');
+select t.como(t.u(6));
+select t.ok(t.falla(format('update public.products set admin_hidden_reason = null where id = %L', t.u(201))), 'un empleado tampoco puede quitar la moderación');
+select t.como(t.u(7));
+select t.ok(t.afecta(format('update public.products set admin_hidden = false, admin_hidden_reason = null where id = %L', t.u(201))) = 1, 'la administración restituye el producto');
+select t.como(t.u(6));
+select t.ok(t.afecta(format('insert into public.products (id, store_id, category_id, name, price, admin_hidden) values (%L, %L, (select id from public.categories where slug = %L), %L, 30, true)', t.u(210), t.u(101), 'ropa', 'Intento de saltar moderación')) = 1, 'se crea el producto');
+select t.root();
+select t.ok(not (select admin_hidden from public.products where id = t.u(210)), 'al crear, la marca de moderación se ignora');
+select t.como(t.u(3));
+select t.ok(t.falla(format('update public.products set store_id = %L where id = %L', t.u(102), t.u(201))), 'un producto no se pasa a otra tienda');
+
+-- imágenes y etiquetas
+select t.como(t.u(6));
+select t.ok(t.afecta(format('insert into public.product_images (product_id, path) values (%L, %L)', t.u(201), t.u(101)::text || '/p201-1.jpg')) = 1, 'se agrega una foto de la carpeta de la tienda');
+select t.ok(t.falla(format('insert into public.product_images (product_id, path) values (%L, %L)', t.u(201), t.u(102)::text || '/ajena.jpg')), 'no se usan fotos de la carpeta de otra tienda');
+select t.ok(t.afecta(format('insert into public.product_images (product_id, path) select %L, %L || ''/p201-'' || g || ''.jpg'' from generate_series(2, 6) g', t.u(201), t.u(101)::text)) = 5, 'hasta 6 fotos por producto');
+select t.ok(t.falla(format('insert into public.product_images (product_id, path) values (%L, %L)', t.u(201), t.u(101)::text || '/p201-7.jpg')), 'la séptima foto se rechaza');
+select t.ok(t.afecta(format('insert into public.product_tags (product_id, tag) values (%L, %L)', t.u(201), '  Saco Negro ')) = 1, 'se agrega una etiqueta');
+select t.root();
+select t.ok(exists (select 1 from public.product_tags where product_id = t.u(201) and tag = 'saco negro'), 'las etiquetas se guardan en minúsculas');
+select t.anon();
+select t.ok(t.n($q$select * from public.buscar_productos(p_texto => 'negro')$q$) = 1, 'la búsqueda también encuentra por etiqueta');
+select t.ok((select image_path from public.buscar_productos(p_texto => 'saco') limit 1) like '%/p201-1.jpg', 'el catálogo devuelve la primera foto');
+
+-- tienda suspendida y categorías
+select t.root();
+update public.stores set status = 'suspendida' where id = t.u(102);
+select t.anon();
+select t.ok(t.n($q$select * from public.buscar_productos(p_categoria => (select id from public.categories where slug = 'ferreteria'))$q$) = 0, 'los productos de una tienda suspendida no salen en la búsqueda');
+select t.root();
+update public.stores set status = 'aprobada' where id = t.u(102);
+select t.como(t.u(7));
+select t.ok(t.afecta($q$insert into public.categories (name, slug) values ('Juguetes', 'juguetes')$q$) = 1, 'la administración crea una categoría');
+select t.ok(t.afecta($q$update public.categories set active = false where slug = 'juguetes'$q$) = 1, 'la administración desactiva una categoría');
+select t.como(t.u(3));
+select t.ok(t.falla($q$insert into public.categories (name, slug) values ('Falsa', 'falsa')$q$), 'un vendedor no crea categorías');
+select t.anon();
+select t.ok(t.n($q$select 1 from public.categories where slug = 'juguetes'$q$) = 0, 'una categoría desactivada no se ve en el público');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                         where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity), 'todas las tablas públicas tienen RLS activado');
 select t.ok((select count(*) from public.roles) = 4 and (select count(*) from public.permissions) = 9, 'roles y permisos iniciales cargados');
 select t.ok((select count(*) from public.role_permissions where role_code = 'vendedor') = 4, 'el rol vendedor tiene 4 permisos');
-select t.ok((select count(*) from public.categories) = 7, 'categorías iniciales cargadas');
+select t.ok((select count(*) from public.categories where slug <> 'juguetes') = 7, 'categorías iniciales cargadas');
 
 -- ═════════ RESUMEN ═════════
 \o

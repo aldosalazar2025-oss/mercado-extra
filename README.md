@@ -68,3 +68,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 1. Aplica en Supabase dev (SQL Editor) el archivo `supabase/migrations/20261112000800_tiendas_empleados.sql`.
 2. Rutas nuevas: `/vendedor/mis-tiendas`, `/vendedor/mis-tiendas/nueva`, `/vendedor/mis-tiendas/:id`, y en el panel admin la sección **Tiendas**.
 3. Las invitaciones se aceptan en **Mi cuenta** entrando con el mismo correo de Google al que se invitó.
+
+## Etapa 7: catálogo
+1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112000900_catalogo.sql`.
+2. Rutas nuevas: `/productos`, `/productos/:id`, `/tiendas`, `/tiendas/:id`, `/vendedor/mis-productos`, y en el panel admin las secciones **Categorías** y **Productos**.
+3. Para ver productos en el catálogo público la tienda debe estar **aprobada** y el producto **publicado**.

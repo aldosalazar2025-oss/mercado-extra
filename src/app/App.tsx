@@ -14,6 +14,9 @@ import { RequiereAdmin, RequiereSesion } from "@/features/auth/Rutas";
 import Registro from "@/features/identidad/Registro";
 import Cuenta from "@/features/identidad/Cuenta";
 import Privacidad from "@/pages/Privacidad";
+import ProductoDetalle from "@/pages/ProductoDetalle";
+import TiendaPublica from "@/pages/TiendaPublica";
+import ProductoEditor from "@/features/catalogo/ProductoEditor";
 import NuevaTienda from "@/features/tiendas/NuevaTienda";
 import TiendaDetalle from "@/features/tiendas/TiendaDetalle";
 
@@ -39,7 +42,9 @@ export default function App() {
       <Route element={<Estructura />}>
         <Route path="/" element={<Inicio />} />
         <Route path="/productos" element={<Productos />} />
+        <Route path="/productos/:id" element={<ProductoDetalle />} />
         <Route path="/tiendas" element={<Tiendas />} />
+        <Route path="/tiendas/:id" element={<TiendaPublica />} />
         <Route path="/solicitar" element={<Solicitar />} />
         <Route path="/ingresar" element={<Ingresar />} />
         <Route path="/estado" element={<Estado />} />
@@ -49,6 +54,8 @@ export default function App() {
           <Route path="/registro" element={<Registro />} />
           <Route path="/cuenta" element={<Cuenta />} />
           <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />
+          <Route path="/vendedor/mis-productos/nuevo" element={<Panel panel="vendedor" seccion="Mis productos" contenido={<ProductoEditor />} />} />
+          <Route path="/vendedor/mis-productos/:productoId" element={<Panel panel="vendedor" seccion="Mis productos" contenido={<ProductoEditor />} />} />
           <Route path="/vendedor/mis-tiendas/nueva" element={<Panel panel="vendedor" seccion="Mis tiendas" contenido={<NuevaTienda />} />} />
           <Route path="/vendedor/mis-tiendas/:tiendaId" element={<Panel panel="vendedor" seccion="Mis tiendas" contenido={<TiendaDetalle />} />} />
           <Route path="/vendedor/:seccion?" element={<Panel panel="vendedor" />} />

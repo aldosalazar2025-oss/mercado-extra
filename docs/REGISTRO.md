@@ -7,8 +7,9 @@
 | 3. Diseño visual | Cerrada | Revisado por el usuario | Sí |
 | 4. Base de datos y seguridad | Cerrada | 181 pruebas locales + migraciones aplicadas y verificadas en Supabase dev por el usuario | Sí |
 | 5. Registro y autenticación | Cerrada | Ingreso con Google confirmado por el usuario; 199 pruebas de base de datos | Sí |
-| 6. Tiendas y empleados | Código listo, falta aplicar migración 0008 | Compilación OK; 233 pruebas de base de datos. Sin probar en pantalla | Pendiente |
-| 7 a 19 | No iniciadas | - | - |
+| 6. Tiendas y empleados | Cerrada | Probada por el usuario en pantalla (invitaciones, permisos, menú) | Sí |
+| 7. Catálogo | Código listo, falta aplicar migración 0009 | Compilación OK; 268 pruebas de base de datos. Sin probar en pantalla | Pendiente |
+| 8 a 19 | No iniciadas | - | - |
 
 ## Etapa 4
 Hecho: 6 migraciones (38 tablas, 83 políticas RLS, 6 buckets, catálogos), funciones de permisos por tienda, protección de campos sensibles, historial de ofertas inmutable, lectura de chat por el administrador con motivo y auditoría.
@@ -30,3 +31,10 @@ Seguridad añadida (migración 0008): el correo del perfil no se cambia desde la
 NO probado: pantallas en navegador, flujo real de invitación con dos cuentas de Google.
 Pendiente: productos de la tienda (Etapa 7); notificaciones al dueño cuando se aprueba/rechaza (Etapa 9).
 Ajustes posteriores a la Etapa 6 (por pruebas del usuario): ficha de solo lectura para empleados sin permiso de gestionar; los guardados que no cambian nada muestran error en vez de "guardado"; el menú del panel de vendedor muestra solo las secciones que permiten los roles/permisos de la persona en alguna de sus tiendas.
+
+## Etapa 7
+Hecho: productos con fotos (hasta 6, comprimidas), etiquetas, categoría, precio, disponibilidad y publicación/ocultamiento/eliminación; catálogo público con buscador, filtros (categoría, precio, distancia) y orden (reciente, precio, cercanía) con paginación; detalle de producto; listado y perfil público de tiendas; inicio con datos reales; categorías y supervisión de productos para el administrador (retiro con motivo, auditado).
+Base de datos (migración 0009): búsqueda por texto en español + nombre + etiquetas, comodines tratados como texto, moderación que la tienda no puede revertir, fotos solo de la carpeta de la propia tienda y orden fijado por el sistema, etiquetas en minúsculas, un producto no cambia de tienda.
+Límites conocidos: la búsqueda no tolera errores de escritura ni ignora tildes (pg_trgm/unaccent se evaluarán); distancia por línea recta; la página de solicitudes aún usa categorías de ejemplo (Etapa 8).
+NO probado: pantallas en navegador, subida real de fotos.
+Ajuste Etapa 7 (por consulta del usuario): "Mis productos" solo lista las tiendas donde la persona tiene el permiso de gestionar productos; sin ese permiso la sección no aparece en el menú.
