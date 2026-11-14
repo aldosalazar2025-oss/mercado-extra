@@ -76,11 +76,14 @@ export default function MisSolicitudes() {
                 <div className="space-y-1 text-right">
                   <span className={`inline-block rounded-full px-3 py-1 text-sm font-bold ${e.clase}`}>{e.texto}</span>
                   {s.status === "abierta" && <p className="text-sm font-semibold">{tiempoRestante(s.expires_at, ahora)}</p>}
-                  {s.status === "con_ofertas" && <p className="text-sm text-suave">Las ofertas se ven en la Etapa 10</p>}
+                  {s.status === "con_ofertas" && <p className="text-sm font-semibold">{s.offers.filter((o) => o.status === "enviada").length} oferta(s) para comparar</p>}
                 </div>
               </div>
               {s.status === "vencida" && <p className="rounded-lg bg-maiz-suave p-3 text-sm">Esta solicitud venció sin recibir ofertas. Renuévala para darle 24 horas más.</p>}
               <div className="flex flex-wrap gap-2">
+                {(s.status === "con_ofertas" || s.status === "atendida") && (
+                  <Link to={`/comprador/mis-solicitudes/${s.id}/ofertas`} className={clasesBoton("primario")}>{s.status === "con_ofertas" ? "Ver y comparar ofertas" : "Ver la oferta elegida"}</Link>
+                )}
                 {s.status === "vencida" && <Boton variante="secundario" disabled={ocupado} onClick={() => pedir(s.id, "abierta")}>Renovar 24 horas</Boton>}
                 {(s.status === "abierta" || s.status === "vencida") && <Link to={`/comprador/mis-solicitudes/${s.id}/editar`} className={clasesBoton("contorno")}>Modificar</Link>}
                 {(s.status === "abierta" || s.status === "con_ofertas" || s.status === "vencida") && (

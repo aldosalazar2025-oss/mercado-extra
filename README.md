@@ -83,3 +83,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001100_coincidencias.sql`.
 2. Para emparejar solicitudes que ya existían, ejecuta una vez: `select public.emparejar_solicitud(id) from public.requests where status in ('abierta','con_ofertas');`
 3. Rutas nuevas: `/notificaciones` y, en el panel de vendedor, **Solicitudes recibidas**.
+
+## Etapa 10: ofertas y negociación
+1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001300_ofertas.sql`. (La Etapa 9c, `supabase/opcionales/`, sigue siendo opcional y no hace falta.)
+2. Rutas nuevas: `/comprador/mis-solicitudes/:id/ofertas`, `/vendedor/solicitudes-recibidas/:id/oferta`, y en el panel de vendedor **Enviar ofertas** y **Mis ofertas**.
+3. Para probar necesitas tres cuentas: un comprador y dos tiendas aprobadas que declaren la misma categoría.

@@ -5,10 +5,25 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { useNotificaciones, type Notificacion } from "@/features/notificaciones/hooks";
 import { supabase } from "@/lib/supabase";
 
-const destino: Record<string, string> = {
-  solicitud_nueva: "/vendedor/solicitudes-recibidas",
-  solicitud_vencida: "/comprador/mis-solicitudes",
-};
+function rutaDe(n: Notificacion): string | null {
+  const rid = typeof n.payload.request_id === "string" ? n.payload.request_id : null;
+  switch (n.type) {
+    case "solicitud_nueva":
+    case "solicitud_atendida":
+      return "/vendedor/solicitudes-recibidas";
+    case "solicitud_vencida":
+      return "/comprador/mis-solicitudes";
+    case "oferta_nueva":
+    case "oferta_actualizada":
+    case "propuesta_nueva":
+      return rid ? `/comprador/mis-solicitudes/${rid}/ofertas` : "/comprador/mis-solicitudes";
+    case "oferta_elegida":
+    case "propuesta_respondida":
+      return "/vendedor/mis-ofertas";
+    default:
+      return null;
+  }
+}
 
 export default function Notificaciones() {
   const { session } = useAuth();
@@ -29,7 +44,7 @@ export default function Notificaciones() {
 
   function abrir(n: Notificacion) {
     if (!n.read_at) marcar.mutate(n.id);
-    const ruta = destino[n.type];
+    const ruta = rutaDe(n);
     if (ruta) ir(ruta);
   }
 

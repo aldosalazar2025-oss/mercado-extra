@@ -15,6 +15,8 @@ Todas las migraciones están en `migrations/` y se aplican **en orden** (el pref
 | `20261112000900_catalogo.sql` | Moderación de productos, reglas de fotos/etiquetas y búsqueda del catálogo (Etapa 7) |
 | `20261112001000_solicitudes.sql` | Reglas de solicitudes: modificar, renovar, vencer, fotos y límites (Etapa 8) |
 | `20261112001100_coincidencias.sql` | Coincidencias solicitud-tienda, avisos y topes anti-spam (Etapa 9) |
+| `20261112001300_ofertas.sql` | Ofertas, elección, historial de propuestas y fotos de ofertas (Etapa 10) |
+| `20261112001200_coincidencias_ajuste.sql` | La categoría declarada manda; el aviso indica la tienda (Etapa 9) |
 
 ## Aplicarlas en tu proyecto Supabase de DESARROLLO (gratis, sin instalar nada)
 1. Entra a tu proyecto **mercado-extra-dev** > **SQL Editor** > **New query**.
@@ -41,5 +43,8 @@ notify pgrst, 'reload schema';
 ```
 
 ## Pruebas automáticas de permisos (opcional, requiere PostgreSQL propio)
-`tests/run_tests.sh` crea una base temporal, simula lo mínimo de Supabase, aplica las migraciones y ejecuta 334 pruebas con usuarios ficticios.
+`tests/run_tests.sh` crea una base temporal, simula lo mínimo de Supabase, aplica las migraciones y ejecuta 339 pruebas con usuarios ficticios.
 No hace falta que las ejecutes tú: yo las corro en cada etapa.
+
+## Archivos opcionales (no son migraciones obligatorias)
+`opcionales/OPCIONAL_coincidencias_ajuste.sql`: hace que la categoría declarada por la tienda mande sobre la de sus productos y que los avisos digan "Para <tienda>". No se aplica por decisión del usuario; se puede aplicar en cualquier momento, en cualquier orden, porque solo reemplaza dos funciones. Sus pruebas están en `opcionales/PRUEBAS_coincidencias_ajuste.sql`.

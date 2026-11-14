@@ -1,0 +1,10 @@
+Pruebas de la capa de consultas (PostgREST, el mismo motor que usa Supabase).
+Comprueban que las consultas con uniones y las llamadas a funciones que hace la web funcionan de verdad,
+algo que las pruebas SQL de 01_rls_tests.sql no pueden detectar (por ejemplo, uniones ambiguas entre tablas).
+
+Cómo se usan (solo desarrollo, requiere PostgreSQL local con la base de pruebas ya cargada):
+  1. bash ../run_tests.sh                      -> deja cargada la base "mercado_extra_test" con datos de prueba
+  2. crear el rol:  create role authenticator noinherit login password 'x'; grant anon, authenticated to authenticator;
+  3. ./postgrest pgrst.conf &                  -> PostgREST 12.x contra esa base
+  4. python3 probar_consultas.py && python3 probar_funciones.py
+Nada de esto se ejecuta en Supabase.

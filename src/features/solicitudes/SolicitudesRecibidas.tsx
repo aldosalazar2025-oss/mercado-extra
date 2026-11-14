@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Boton from "@/components/Boton";
+import { Link } from "react-router-dom";
+import Boton, { clasesBoton } from "@/components/Boton";
+import { useMisTiendas, usePermisosPorTienda } from "@/features/tiendas/hooks";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 import { tiempoRestante } from "./tipos";
@@ -20,9 +22,13 @@ type Fila = {
 
 const motivo: Record<string, string> = { categoria: "categoría", producto: "tus productos", etiqueta: "tus etiquetas" };
 
-export default function SolicitudesRecibidas() {
+export default function SolicitudesRecibidas({ soloPendientes = false }: { soloPendientes?: boolean }) {
   const cliente = useQueryClient();
   const [mensaje, setMensaje] = useState<string | null>(null);
+  const tiendas = useMisTiendas();
+  const permisos = usePermisosPorTienda();
+  // Solo las tiendas de esta persona: un administrador también ve las de todos, pero aquí solo importan las suyas.
+  const ids = (tiendas.data ?? []).filter((t) => permisos.data?.get(t.id)?.has("ver_solicitudes")).map((t) => t.id);
   const [ahora, setAhora] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setAhora(Date.now()), 30000);
@@ -30,13 +36,15 @@ export default function SolicitudesRecibidas() {
   }, []);
 
   const lista = useQuery({
-    queryKey: ["solicitudes-recibidas"],
+    queryKey: ["solicitudes-recibidas", ids.join("|")],
+    enabled: ids.length > 0 && Boolean(supabase),
     refetchInterval: 60000,
     queryFn: async () => {
-      if (!supabase) return { filas: [] as Fila[], urls: new Map<string, string>() };
+      if (!supabase) return { filas: [] as Fila[], urls: new Map<string, string>(), ofertas: new Map<string, string>() };
       const { data, error } = await supabase
         .from("request_matches")
         .select("request_id,store_id,score,matched_by,stores(name),requests!inner(id,title,description,attributes,max_budget,budget_negotiable,status,expires_at,categories(name),request_images(id,path))")
+        .in("store_id", ids)
         .eq("dismissed", false)
         .in("requests.status", ["abierta", "con_ofertas"])
         .gt("requests.expires_at", new Date().toISOString())
@@ -49,7 +57,12 @@ export default function SolicitudesRecibidas() {
         const firmadas = await supabase.storage.from("request-images").createSignedUrls(rutas, 3600);
         (firmadas.data ?? []).forEach((x) => { if (x.path && x.signedUrl) urls.set(x.path, x.signedUrl); });
       }
-      return { filas, urls };
+      const ofertas = new Map<string, string>();
+      if (filas.length > 0) {
+        const of = await supabase.from("offers").select("request_id,store_id,status").in("store_id", ids).in("request_id", filas.map((f) => f.request_id));
+        (of.data ?? []).forEach((x) => ofertas.set(`${x.request_id}-${x.store_id}`, x.status as string));
+      }
+      return { filas, urls, ofertas };
     },
   });
 
@@ -63,7 +76,10 @@ export default function SolicitudesRecibidas() {
     onError: (e) => setMensaje(e instanceof Error ? e.message : "Error"),
   });
 
-  const tiendas = new Set(lista.data?.filas.map((f) => f.store_id));
+  if (tiendas.isLoading || permisos.isLoading) return <p className="text-suave">Cargando…</p>;
+  if (ids.length === 0) {
+    return <p className="rounded-xl bg-white p-6 text-suave">Aquí verás las solicitudes de compradores para tus tiendas. Necesitas tener una tienda aprobada (o ser empleado con permiso de ver solicitudes). Registra la tuya en <Link to="/vendedor/mis-tiendas" className="font-bold text-mercado underline">Mis tiendas</Link>.</p>;
+  }
 
   return (
     <div className="space-y-4">
@@ -71,12 +87,13 @@ export default function SolicitudesRecibidas() {
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}
       {lista.isLoading && <p className="text-suave">Cargando…</p>}
       {lista.error && <p role="alert" className="text-error">No se pudieron cargar las solicitudes.</p>}
-      {lista.data?.filas.length === 0 && (
+      {lista.data && lista.data.filas.filter((f) => !soloPendientes || !lista.data?.ofertas.has(`${f.request_id}-${f.store_id}`)).length === 0 && (
         <p className="rounded-xl bg-white p-6 text-suave">Por ahora no hay solicitudes para tus tiendas. Cuando un comprador pida algo relacionado, te avisaremos. Para recibir más, completa las categorías de tu tienda y publica tus productos.</p>
       )}
       <ul className="space-y-3">
-        {lista.data?.filas.map((f) => {
+        {lista.data?.filas.filter((f) => !soloPendientes || !lista.data?.ofertas.has(`${f.request_id}-${f.store_id}`)).map((f) => {
           const s = f.requests;
+          const miOferta = lista.data?.ofertas.get(`${f.request_id}-${f.store_id}`);
           const carac = [s.attributes.talla && `Talla: ${s.attributes.talla}`, s.attributes.color && `Color: ${s.attributes.color}`, s.attributes.modelo && `Modelo: ${s.attributes.modelo}`].filter(Boolean).join(" · ");
           return (
             <li key={`${f.request_id}-${f.store_id}`} className="space-y-3 rounded-xl border border-borde bg-white p-4">
@@ -85,7 +102,7 @@ export default function SolicitudesRecibidas() {
                   <p className="font-display text-lg font-bold">{s.title}</p>
                   <p className="text-sm text-suave">{[s.categories?.name, `Hasta ${soles(s.max_budget)}${s.budget_negotiable ? " (negociable)" : ""}`, carac].filter(Boolean).join(" · ")}</p>
                   {s.description && <p className="text-sm">{s.description}</p>}
-                  {tiendas.size > 1 && <p className="text-sm font-semibold">Para: {f.stores?.name}</p>}
+                  <p className="text-sm font-semibold">Para tu tienda: {f.stores?.name}</p>
                   <p className="text-xs text-suave">Coincide por: {f.matched_by.map((m) => motivo[m] ?? m).join(", ")}</p>
                 </div>
                 <p className="text-sm font-semibold">{tiempoRestante(s.expires_at, ahora)}</p>
@@ -98,9 +115,15 @@ export default function SolicitudesRecibidas() {
                 </ul>
               )}
               <div className="flex flex-wrap items-center gap-2">
-                <Boton variante="secundario" disabled title="Disponible en la Etapa 10">Enviar oferta</Boton>
+                {miOferta ? (
+                  <>
+                    <span className="rounded-full bg-hoja px-3 py-1 text-sm font-bold text-pino">Ya ofertaste</span>
+                    <Link to="/vendedor/mis-ofertas" className={clasesBoton("contorno")}>Ver mi oferta</Link>
+                  </>
+                ) : (
+                  <Link to={`/vendedor/solicitudes-recibidas/${f.request_id}/oferta?tienda=${f.store_id}`} className={clasesBoton("secundario")}>Enviar oferta</Link>
+                )}
                 <Boton variante="contorno" disabled={descartar.isPending} onClick={() => { if (confirm("¿Descartar esta solicitud? Dejará de aparecerte.")) descartar.mutate(f); }}>No me interesa</Boton>
-                <span className="text-sm text-suave">Enviar ofertas se activa en la siguiente etapa.</span>
               </div>
             </li>
           );

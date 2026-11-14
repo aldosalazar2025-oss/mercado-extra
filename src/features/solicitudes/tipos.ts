@@ -14,10 +14,11 @@ export type Solicitud = {
   created_at: string;
   categories: { name: string } | null;
   request_images: { id: string; path: string }[];
+  offers: { id: string; status: string }[];
 };
 
 export const COLUMNAS_SOLICITUD =
-  "id,title,description,category_id,attributes,max_budget,budget_negotiable,status,expires_at,renewed_count,created_at,categories(name),request_images(id,path)";
+  "id,title,description,category_id,attributes,max_budget,budget_negotiable,status,expires_at,renewed_count,created_at,categories(name),request_images(id,path),offers!offers_request_id_fkey(id,status)";
 
 export const etiquetaSolicitud: Record<EstadoSolicitud, { texto: string; clase: string }> = {
   abierta: { texto: "Abierta", clase: "bg-hoja text-pino" },

@@ -242,9 +242,8 @@ select t.ok((select status from public.requests where id = t.u(301)) = 'con_ofer
 select t.como(t.u(1));
 select t.ok(t.n(format('select 1 from public.offers where request_id = %L', t.u(301))) = 1, 'comprador ve las ofertas de su solicitud');
 select t.ok(t.n(format('select 1 from public.offer_history where offer_id = %L', t.u(410))) = 2, 'comprador ve el historial de propuestas');
-select t.ok(t.falla(format('update public.offer_history set price = 1 where offer_id = %L', t.u(410))), 'comprador no puede cambiar precios');
-select t.ok(t.afecta(format('update public.offer_history set accepted_by_buyer_at = now() where offer_id = %L and version = 2', t.u(410))) = 1, 'comprador acepta la propuesta vigente');
-select t.ok(t.falla(format('update public.offer_history set accepted_by_buyer_at = null where offer_id = %L and version = 2', t.u(410))), 'una aceptación no se puede deshacer');
+select t.ok(t.afecta(format('update public.offer_history set price = 1 where offer_id = %L', t.u(410))) <= 0, 'comprador no puede cambiar precios');
+select t.ok(t.afecta(format('update public.offer_history set accepted_by_buyer_at = now() where offer_id = %L and version = 2', t.u(410))) <= 0, 'el comprador ya no acepta por su cuenta: usa elegir_oferta');
 select t.como(t.u(2));
 select t.ok(t.n(format('select 1 from public.offers where id = %L', t.u(410))) = 0, 'otro comprador no ve ofertas ajenas');
 select t.como(t.u(4));
@@ -362,8 +361,9 @@ select t.ok(t.falla(format('insert into public.requests (buyer_id, title, max_bu
 
 -- 11. Notificaciones
 select t.como(t.u(1));
-select t.ok(t.n('select 1 from public.notifications') = 1, 'usuario solo ve sus notificaciones');
-select t.ok(t.afecta('update public.notifications set read_at = now()') = 1, 'usuario marca su notificación como leída');
+select t.ok(t.n($q$select 1 from public.notifications where type = 'prueba'$q$) = 1, 'usuario solo ve sus notificaciones');
+select t.ok(t.n(format('select 1 from public.notifications where user_id <> %L', t.u(1))) = 0, 'nunca aparecen avisos de otra persona');
+select t.ok(t.afecta($q$update public.notifications set read_at = now() where type = 'prueba'$q$) = 1, 'usuario marca su notificación como leída');
 select t.ok(t.falla($q$update public.notifications set title = 'Alterado'$q$), 'usuario no altera el contenido de notificaciones');
 select t.ok(t.falla(format('insert into public.notifications (user_id, type, title) values (%L, %L, %L)', t.u(2), 'x', 'Falsa')), 'usuario no crea notificaciones');
 
@@ -698,6 +698,140 @@ select t.ok(t.afecta('update public.notifications set read_at = now() where read
 select t.ok(t.falla($q$update public.notifications set title = 'Alterado'$q$), 'no se altera el contenido de los avisos');
 select t.como(t.u(2));
 select t.ok(t.n(format('select 1 from public.notifications where user_id = %L', t.u(3))) = 0, 'nadie lee los avisos de otro usuario');
+
+-- 12i. Etapa 10: ofertas, elección y cambios de precio
+select t.root();
+create table t.ids (clave text primary key, id uuid);
+create function t.v(req uuid, sid uuid, ver int) returns uuid language sql security definer as
+  $$ select h.id from public.offer_history h join public.offers o on o.id = h.offer_id where o.request_id = req and o.store_id = sid and h.version = ver $$;
+create function t.o(req uuid, sid uuid) returns uuid language sql security definer as
+  $$ select id from public.offers where request_id = req and store_id = sid $$;
+insert into public.stores (id, owner_id, name, status, offers_delivery, offers_pickup) values
+  (t.u(161), t.u(3), 'Calzado Andino (prueba)', 'aprobada', true, true),
+  (t.u(162), t.u(4), 'Zapatería Central (prueba)', 'aprobada', false, true);
+insert into public.store_categories (store_id, category_id)
+  select s, (select id from public.categories where slug = 'calzado') from (values (t.u(161)), (t.u(162))) v(s);
+insert into public.requests (id, buyer_id, title, category_id, max_budget)
+  select x.i, t.u(1), x.titulo, (select id from public.categories where slug = 'calzado'), 150
+  from (values (t.u(350), 'Zapatos negros talla 40'), (t.u(351), 'Zapatillas blancas'), (t.u(352), 'Sandalias talla 38')) x(i, titulo);
+select t.ok((select count(*) from public.request_matches where request_id = t.u(350)) = 2, 'las dos tiendas de calzado reciben la solicitud');
+
+-- enviar ofertas
+select t.como(t.u(3));
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 120, %L, %L, %L, %L, %L)', t.u(350), t.u(161), 'Zapatos de cuero negro', 'En stock', 'Entrega en 2 horas', 'Hoy', 'Incluye caja')) = 1, 'una tienda relacionada envía su oferta');
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 0)', t.u(350), t.u(161))), 'el precio debe ser mayor que cero');
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 100)', t.u(350), t.u(101))), 'una tienda no relacionada no puede ofertar');
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 100, null, null, null, null, null, %L::text[])', t.u(350), t.u(161), '{foo/bar/x.jpg}')), 'las fotos deben estar en la carpeta de la oferta');
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 100, null, null, null, null, null, (select array_agg(%L || ''/f'' || g || ''.jpg'') from generate_series(1, 6) g))', t.u(350), t.u(161), t.u(350)::text || '/' || t.u(161)::text)), 'máximo 5 fotos por oferta');
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 80)', t.u(352), t.u(161))) = 1, 'oferta para la tercera solicitud');
+select t.como(t.u(4));
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 110)', t.u(350), t.u(162))) = 1, 'una segunda tienda compite por la misma solicitud');
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 95)', t.u(350), t.u(161))), 'no se oferta en nombre de otra tienda');
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 90)', t.u(351), t.u(162))) = 1, 'oferta de solo recojo para la segunda solicitud');
+select t.root();
+select t.ok((select count(*) from public.notifications where user_id = t.u(1) and type = 'oferta_nueva' and payload ->> 'request_id' = t.u(350)::text) = 2, 'el comprador recibe un aviso por cada oferta');
+select t.ok((select status from public.requests where id = t.u(350)) = 'con_ofertas', 'la solicitud pasa a "con ofertas"');
+
+-- nueva propuesta antes de elegir
+select t.como(t.u(3));
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 115, %L)', t.u(350), t.u(161), 'Rebaja por tiempo limitado')) = 1, 'la tienda envía una propuesta con otro precio');
+select t.root();
+select t.ok((select count(*) from public.offer_history where offer_id = t.o(t.u(350), t.u(161))) = 2, 'la propuesta anterior queda en el historial');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(1) and type = 'oferta_actualizada' and payload ->> 'request_id' = t.u(350)::text), 'el comprador es avisado de la actualización');
+select t.como(t.u(1));
+select t.ok(t.n(format('select 1 from public.offers where request_id = %L', t.u(350))) = 2, 'el comprador ve las dos ofertas para compararlas');
+select t.ok(t.n(format('select 1 from public.offer_history where offer_id = %L', t.o(t.u(350), t.u(161)))) = 2, 'y el historial de cada una');
+
+-- elegir
+select t.ok(t.falla(format('select public.elegir_oferta(%L, %L)', t.v(t.u(350), t.u(161), 1), 'domicilio')), 'no se puede elegir una versión que la tienda ya reemplazó');
+select t.como(t.u(2));
+select t.ok(t.falla(format('select public.elegir_oferta(%L, %L)', t.v(t.u(350), t.u(161), 2), 'domicilio')), 'otro comprador no puede elegir ofertas ajenas');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.elegir_oferta(%L, %L)', t.v(t.u(350), t.u(161), 2), 'domicilio')), 'la tienda no puede elegirse a sí misma');
+select t.anon();
+select t.ok(t.falla(format('select public.elegir_oferta(%L, %L)', t.v(t.u(350), t.u(161), 2), 'domicilio')), 'un visitante no puede elegir');
+select t.como(t.u(1));
+select t.ok(t.falla(format('select public.elegir_oferta(%L, %L)', t.v(t.u(351), t.u(162), 1), 'domicilio')), 'no se elige una modalidad que la tienda no ofrece');
+select t.ok(t.afecta(format('select public.elegir_oferta(%L, %L)', t.v(t.u(351), t.u(162), 1), 'recojo')) = 1, 'el comprador elige con recojo en tienda');
+select t.ok(t.afecta(format('select public.elegir_oferta(%L, %L)', t.v(t.u(350), t.u(161), 2), 'domicilio')) = 1, 'el comprador elige la oferta de la primera tienda');
+select t.ok(t.falla(format('select public.elegir_oferta(%L, %L)', t.v(t.u(350), t.u(162), 1), 'recojo')), 'ya no se puede elegir otra oferta de la misma solicitud');
+select t.root();
+select t.ok((select status = 'atendida' and selected_offer_id = t.o(t.u(350), t.u(161)) from public.requests where id = t.u(350)), 'la solicitud se cierra con la oferta elegida');
+select t.ok((select status from public.offers where id = t.o(t.u(350), t.u(161))) = 'aceptada' and (select status from public.offers where id = t.o(t.u(350), t.u(162))) = 'rechazada', 'la oferta elegida queda aceptada y las demás rechazadas');
+select t.ok((select accepted_by_buyer_at is not null from public.offer_history where id = t.v(t.u(350), t.u(161), 2)), 'la versión aceptada queda registrada');
+select t.ok((select status = 'oferta_aceptada' and agreed_price = 115 and delivery_mode = 'domicilio' and buyer_id = t.u(1) and store_id = t.u(161) and offer_version_id = t.v(t.u(350), t.u(161), 2) from public.orders where request_id = t.u(350)), 'se crea el pedido con el precio acordado');
+select t.ok((select count(*) from public.order_items i join public.orders o on o.id = i.order_id where o.request_id = t.u(350) and i.unit_price = 115) = 1, 'y su detalle');
+select t.ok(exists (select 1 from public.conversations c join public.orders o on o.id = c.order_id where o.request_id = t.u(350) and c.status = 'activa' and c.buyer_id = t.u(1) and c.store_id = t.u(161)), 'se abre el chat privado con la tienda elegida');
+select t.ok(exists (select 1 from public.delivery_events e join public.orders o on o.id = e.order_id where o.request_id = t.u(350) and e.event = 'oferta_aceptada'), 'queda el primer evento del pedido');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(3) and type = 'oferta_elegida' and payload ->> 'request_id' = t.u(350)::text), 'la tienda elegida es avisada');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(4) and type = 'solicitud_atendida' and payload ->> 'request_id' = t.u(350)::text), 'las demás tiendas son avisadas de que ya fue atendida');
+select t.ok(not exists (select 1 from public.notifications where user_id = t.u(1) and type in ('oferta_elegida', 'solicitud_atendida')), 'el comprador no recibe esos avisos');
+
+-- cambios de precio después de elegir (requieren aceptación del comprador)
+select t.como(t.u(3));
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 125, %L)', t.u(350), t.u(161), 'Subió el costo del material')) = 1, 'la tienda propone un nuevo precio tras ser elegida');
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 130)', t.u(350), t.u(161))), 'no puede haber dos propuestas pendientes');
+select t.ok(t.afecta(format('update public.orders set agreed_price = 1 where request_id = %L', t.u(350))) = 0, 'la tienda no cambia el precio del pedido por su cuenta');
+select t.root();
+select t.ok((select agreed_price from public.orders where request_id = t.u(350)) = 115, 'mientras no se acepte, el precio acordado no cambia');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(1) and type = 'propuesta_nueva' and payload ->> 'request_id' = t.u(350)::text), 'el comprador es avisado de la propuesta');
+select t.como(t.u(4));
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 100)', t.u(350), t.u(162))), 'una oferta rechazada no admite nuevas propuestas');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.responder_propuesta(%L, true)', t.v(t.u(350), t.u(161), 3))), 'la tienda no puede aceptar su propia propuesta');
+select t.como(t.u(2));
+select t.ok(t.falla(format('select public.responder_propuesta(%L, true)', t.v(t.u(350), t.u(161), 3))), 'otro comprador no responde propuestas ajenas');
+select t.como(t.u(1));
+select t.ok(t.afecta(format('select public.responder_propuesta(%L, false)', t.v(t.u(350), t.u(161), 3))) = 1, 'el comprador rechaza la propuesta');
+select t.root();
+select t.ok((select agreed_price from public.orders where request_id = t.u(350)) = 115, 'el precio acordado sigue igual');
+select t.ok((select rejected_by_buyer_at is not null and accepted_by_buyer_at is null from public.offer_history where id = t.v(t.u(350), t.u(161), 3)), 'el rechazo queda registrado');
+select t.como(t.u(3));
+select t.ok(t.afecta(format('select public.enviar_oferta(%L, %L, 118, %L)', t.u(350), t.u(161), 'Precio final')) = 1, 'la tienda envía otra propuesta');
+select t.como(t.u(1));
+select t.ok(t.falla(format('select public.responder_propuesta(%L, true)', t.v(t.u(350), t.u(161), 3))), 'una propuesta ya respondida no se vuelve a responder');
+select t.ok(t.afecta(format('select public.responder_propuesta(%L, true)', t.v(t.u(350), t.u(161), 4))) = 1, 'el comprador acepta la nueva propuesta');
+select t.root();
+select t.ok((select agreed_price = 118 and offer_version_id = t.v(t.u(350), t.u(161), 4) from public.orders where request_id = t.u(350)), 'el pedido toma el nuevo precio');
+select t.ok((select unit_price from public.order_items i join public.orders o on o.id = i.order_id where o.request_id = t.u(350)) = 118, 'y el detalle del pedido también');
+select t.ok(exists (select 1 from public.delivery_events e join public.orders o on o.id = e.order_id where o.request_id = t.u(350) and e.event = 'precio_actualizado'), 'queda el evento de precio actualizado');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(3) and type = 'propuesta_respondida' and payload ->> 'request_id' = t.u(350)::text), 'la tienda es avisada de la respuesta');
+update public.orders set status = 'enviado_o_listo' where request_id = t.u(350);
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 99)', t.u(350), t.u(161))), 'con el pedido enviado ya no se cambia el precio');
+
+-- retirar una oferta
+select t.ok(t.afecta(format('update public.offers set status = %L where request_id = %L and store_id = %L', 'retirada', t.u(352), t.u(161))) = 1, 'la tienda retira su oferta');
+select t.root();
+select t.ok((select status from public.requests where id = t.u(352)) = 'abierta', 'sin ofertas activas, la solicitud vuelve a estar abierta');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.enviar_oferta(%L, %L, 70)', t.u(352), t.u(161))), 'una oferta retirada no se reactiva');
+
+-- fotos de ofertas (almacenamiento)
+select t.ok(t.afecta(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'offer-images', t.u(350)::text || '/' || t.u(161)::text || '/f1.jpg')) = 1, 'la tienda sube fotos de su oferta');
+select t.como(t.u(4));
+select t.ok(t.falla(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'offer-images', t.u(350)::text || '/' || t.u(161)::text || '/hack.jpg')), 'otra tienda no sube fotos a la oferta de la competencia');
+select t.ok(t.falla(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'offer-images', t.u(350)::text || '/' || t.u(162)::text || '/tarde.jpg')), 'una oferta rechazada ya no recibe fotos');
+select t.ok(t.n($q$select 1 from storage.objects where bucket_id = 'offer-images'$q$) = 0, 'la competencia no ve las fotos de otra oferta');
+select t.como(t.u(1));
+select t.ok(t.n($q$select 1 from storage.objects where bucket_id = 'offer-images'$q$) = 1, 'el comprador ve las fotos de las ofertas de su solicitud');
+select t.como(t.u(2));
+select t.ok(t.n($q$select 1 from storage.objects where bucket_id = 'offer-images'$q$) = 0, 'otro comprador no ve fotos de ofertas ajenas');
+
+-- 12j. Uniones de tablas que usa la web (evita consultas ambiguas del servidor)
+select t.root();
+select t.ok(not exists (
+  select 1 from (values ('offers','stores'),('products','categories'),('products','product_images'),('products','product_tags'),('products','stores'),
+                        ('request_matches','requests'),('request_matches','stores'),('requests','categories'),('requests','request_images'),
+                        ('store_categories','categories'),('stores','store_categories'),('stores','profiles')) p(a, b)
+  where (select count(*) from pg_constraint c where c.contype = 'f'
+         and ((c.conrelid = ('public.' || p.a)::regclass and c.confrelid = ('public.' || p.b)::regclass)
+           or (c.conrelid = ('public.' || p.b)::regclass and c.confrelid = ('public.' || p.a)::regclass))) <> 1
+), 'las uniones de tablas que la web usa sin indicación no son ambiguas');
+select t.ok((select count(*) from pg_constraint where conname in ('offers_request_id_fkey', 'offer_history_offer_id_fkey')) = 2, 'existen las relaciones nombradas que la web usa para desambiguar solicitudes/ofertas/historial');
+
+select t.como(t.u(7));
+select t.ok(t.n('select 1 from public.request_matches') >= 1, 'la administración ve las coincidencias de todas las tiendas (por eso el panel del vendedor filtra por las tiendas propias)');
 
 -- 13. Estructura y catálogos
 select t.root();
