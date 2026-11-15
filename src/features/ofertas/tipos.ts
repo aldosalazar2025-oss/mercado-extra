@@ -35,6 +35,16 @@ export function propuestaPendiente<T extends Pick<Version, "version" | "accepted
   return ordenarVersiones(versiones).find((x) => x.version > aceptada && !x.accepted_by_buyer_at && !x.rejected_by_buyer_at) ?? null;
 }
 
+// Versión que vale hoy: antes de que la elijan, la última propuesta enviada;
+// después de elegida, la última que el comprador ACEPTÓ (una propuesta rechazada o pendiente no cambia el precio).
+export function versionVigente<T extends Pick<Version, "id" | "version" | "accepted_by_buyer_at" | "rejected_by_buyer_at">>(
+  versiones: T[], estado: EstadoOferta, actualId: string | null,
+): T | undefined {
+  const ordenadas = ordenarVersiones(versiones);
+  if (estado === "aceptada") return ordenadas.find((v) => v.accepted_by_buyer_at && !v.rejected_by_buyer_at) ?? ordenadas[0];
+  return ordenadas.find((v) => v.id === actualId) ?? ordenadas[0];
+}
+
 export function traducirError(mensaje: string | undefined): string {
   if (!mensaje) return "Ocurrió un error. Inténtalo de nuevo.";
   if (mensaje.includes("row-level security")) return "No tienes permiso para hacer esto, o la solicitud ya no está disponible.";

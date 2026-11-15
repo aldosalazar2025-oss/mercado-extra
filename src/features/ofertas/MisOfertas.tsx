@@ -5,7 +5,7 @@ import Boton, { clasesBoton } from "@/components/Boton";
 import { useMisTiendas, usePermisosPorTienda } from "@/features/tiendas/hooks";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
-import { etiquetaOferta, ordenarVersiones, propuestaPendiente, type EstadoOferta, type Version } from "./tipos";
+import { etiquetaOferta, ordenarVersiones, propuestaPendiente, versionVigente, type EstadoOferta, type Version } from "./tipos";
 
 type Fila = {
   id: string; status: EstadoOferta; store_id: string; request_id: string; current_version_id: string | null; created_at: string;
@@ -59,7 +59,7 @@ export default function MisOfertas() {
       <ul className="space-y-3">
         {lista.data?.map((f) => {
           const versiones = ordenarVersiones(f.offer_history);
-          const vigente = versiones.find((v) => v.id === f.current_version_id) ?? versiones[0];
+          const vigente = versionVigente(versiones, f.status, f.current_version_id);
           const e = etiquetaOferta[f.status];
           const pend = propuestaPendiente(versiones, f.status);
           const abierta = f.status === "enviada" || f.status === "aceptada";
@@ -72,6 +72,7 @@ export default function MisOfertas() {
                 </div>
                 <div className="space-y-1 text-right">
                   <p className="text-2xl font-extrabold text-pino">{vigente ? soles(vigente.price) : "—"}</p>
+                  {f.status === "aceptada" && <p className="text-xs font-semibold text-suave">Precio acordado</p>}
                   <span className={`inline-block rounded-full px-3 py-0.5 text-sm font-bold ${e.clase}`}>{e.texto}</span>
                 </div>
               </div>
@@ -82,7 +83,7 @@ export default function MisOfertas() {
                 <details className="text-sm">
                   <summary className="cursor-pointer font-bold">Historial de propuestas ({versiones.length})</summary>
                   <ul className="mt-2 space-y-1">
-                    {versiones.map((v) => <li key={v.id}>{new Date(v.created_at).toLocaleString("es-PE")} · {soles(v.price)}{v.accepted_by_buyer_at ? " · aceptada" : ""}{v.rejected_by_buyer_at ? " · rechazada" : ""}</li>)}
+                    {versiones.map((v) => <li key={v.id}>{new Date(v.created_at).toLocaleString("es-PE")} · {soles(v.price)}{v.rejected_by_buyer_at ? " · rechazada por el comprador" : v.id === vigente?.id && f.status === "aceptada" ? " · precio acordado" : v.accepted_by_buyer_at ? " · aceptada, luego reemplazada" : ""}</li>)}
                   </ul>
                 </details>
               )}

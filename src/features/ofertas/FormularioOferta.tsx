@@ -5,17 +5,17 @@ import Campo, { estiloInput } from "@/components/Campo";
 import { comprimirImagen } from "@/lib/imagen";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
-import { COLUMNAS_VERSION, ordenarVersiones, propuestaPendiente, traducirError, type EstadoOferta, type Version } from "./tipos";
+import { COLUMNAS_VERSION, ordenarVersiones, propuestaPendiente, traducirError, versionVigente, type EstadoOferta, type Version } from "./tipos";
 
 type Contexto = {
   solicitud: { id: string; title: string; description: string | null; max_budget: number; budget_negotiable: boolean; status: string; expires_at: string; categories: { name: string } | null } | null;
-  oferta: { id: string; status: EstadoOferta; offer_history: Version[] } | null;
+  oferta: { id: string; status: EstadoOferta; current_version_id: string | null; offer_history: Version[] } | null;
 };
 
 function Campos({ requestId, storeId, ctx, onEnviado }: { requestId: string; storeId: string; ctx: Contexto; onEnviado: () => void }) {
   const cliente = useQueryClient();
   const versiones = ordenarVersiones(ctx.oferta?.offer_history ?? []);
-  const ultima = versiones[0];
+  const ultima = ctx.oferta ? versionVigente(versiones, ctx.oferta.status, ctx.oferta.current_version_id) : undefined;
   const [precio, setPrecio] = useState(ultima ? String(ultima.price) : "");
   const [descripcion, setDescripcion] = useState(ultima?.description ?? "");
   const [disponibilidad, setDisponibilidad] = useState(ultima?.availability ?? "");
@@ -142,7 +142,7 @@ export default function FormularioOferta({ requestId, storeId, onEnviado }: { re
       if (!supabase) return { solicitud: null, oferta: null };
       const [r, o] = await Promise.all([
         supabase.from("requests").select("id,title,description,max_budget,budget_negotiable,status,expires_at,categories(name)").eq("id", requestId).maybeSingle(),
-        supabase.from("offers").select(`id,status,offer_history!offer_history_offer_id_fkey(${COLUMNAS_VERSION})`).eq("request_id", requestId).eq("store_id", storeId).maybeSingle(),
+        supabase.from("offers").select(`id,status,current_version_id,offer_history!offer_history_offer_id_fkey(${COLUMNAS_VERSION})`).eq("request_id", requestId).eq("store_id", storeId).maybeSingle(),
       ]);
       return { solicitud: r.data as unknown as Contexto["solicitud"], oferta: o.data as unknown as Contexto["oferta"] };
     },

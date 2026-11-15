@@ -6,7 +6,7 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { etiquetaSolicitud, type EstadoSolicitud } from "@/features/solicitudes/tipos";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
-import { COLUMNAS_VERSION, etiquetaOferta, ordenarVersiones, propuestaPendiente, traducirError, type EstadoOferta, type Version } from "./tipos";
+import { COLUMNAS_VERSION, etiquetaOferta, ordenarVersiones, propuestaPendiente, traducirError, versionVigente, type EstadoOferta, type Version } from "./tipos";
 
 type Oferta = {
   id: string; status: EstadoOferta; store_id: string; current_version_id: string | null;
@@ -23,7 +23,7 @@ function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
   o: Oferta; datos: Datos; puedeElegir: boolean; ocupado: boolean; onElegir: (version: Version, modo: "domicilio" | "recojo") => void;
 }) {
   const versiones = ordenarVersiones(o.offer_history);
-  const vigente = versiones.find((v) => v.id === o.current_version_id) ?? versiones[0];
+  const vigente = versionVigente(versiones, o.status, o.current_version_id);
   const tienda = o.stores;
   const [modo, setModo] = useState<"domicilio" | "recojo">(tienda?.offers_delivery ? "domicilio" : "recojo");
   const rep = tienda ? datos.reputaciones.get(tienda.owner_id) : undefined;
@@ -66,7 +66,7 @@ function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
             {versiones.map((v) => (
               <li key={v.id}>
                 {new Date(v.created_at).toLocaleString("es-PE")} · {soles(v.price)}
-                {v.id === vigente.id ? " (vigente)" : ""}{v.accepted_by_buyer_at ? " · aceptada" : ""}{v.rejected_by_buyer_at ? " · rechazada por ti" : ""}
+                {v.rejected_by_buyer_at ? " · rechazada por ti" : v.id === vigente.id ? (o.status === "aceptada" ? " · precio acordado" : " (vigente)") : v.accepted_by_buyer_at ? " · aceptada, luego reemplazada" : ""}
               </li>
             ))}
           </ul>
@@ -172,7 +172,7 @@ export default function OfertasSolicitud() {
   const elegida = d.ofertas.find((o) => o.status === "aceptada");
   const otras = d.ofertas.filter((o) => o.status === "rechazada");
   const pendiente = elegida ? propuestaPendiente(elegida.offer_history, elegida.status) : null;
-  const vigenteElegida = elegida ? ordenarVersiones(elegida.offer_history).find((v) => v.accepted_by_buyer_at && !v.rejected_by_buyer_at) : null;
+  const vigenteElegida = elegida ? versionVigente(elegida.offer_history, elegida.status, elegida.current_version_id) : null;
   const mejor = activas[0]?.id;
 
   return (
