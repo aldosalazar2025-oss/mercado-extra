@@ -17,6 +17,11 @@ function rutaDe(n: Notificacion): string | null {
     case "oferta_actualizada":
     case "propuesta_nueva":
       return rid ? `/comprador/mis-solicitudes/${rid}/ofertas` : "/comprador/mis-solicitudes";
+    case "mensaje_nuevo": {
+      const cid = typeof n.payload.conversation_id === "string" ? n.payload.conversation_id : null;
+      const para = n.payload.para === "vendedor" ? "vendedor" : "comprador";
+      return cid ? `/${para}/chat/${cid}` : `/${para}/chat`;
+    }
     case "oferta_elegida":
     case "propuesta_respondida":
       return "/vendedor/mis-ofertas";

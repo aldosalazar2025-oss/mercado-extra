@@ -833,6 +833,84 @@ select t.ok((select count(*) from pg_constraint where conname in ('offers_reques
 select t.como(t.u(7));
 select t.ok(t.n('select 1 from public.request_matches') >= 1, 'la administración ve las coincidencias de todas las tiendas (por eso el panel del vendedor filtra por las tiendas propias)');
 
+-- 12k. Etapa 11: chat
+select t.root();
+create function t.c(req uuid) returns uuid language sql security definer as $$ select id from public.conversations where request_id = req $$;
+select t.ok(t.c(t.u(350)) is not null, 'elegir una oferta dejó abierta la conversación');
+
+-- reglas al enviar
+select t.como(t.u(1));
+select t.ok(t.falla(format('insert into public.messages (conversation_id, sender_id, image_path) values (%L, %L, %L)', t.c(t.u(350)), t.u(1), 'otra-carpeta/foto.jpg')), 'las fotos deben estar en la carpeta de la conversación');
+select t.ok(t.afecta(format('insert into public.messages (conversation_id, sender_id, image_path) values (%L, %L, %L)', t.c(t.u(350)), t.u(1), t.c(t.u(350))::text || '/foto1.jpg')) = 1, 'se envía una foto');
+select t.ok(t.falla(format('insert into public.messages (conversation_id, sender_id) values (%L, %L)', t.c(t.u(350)), t.u(1))), 'un mensaje no puede ir vacío');
+select t.ok(t.falla(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, repeat(%L, 2001))', t.c(t.u(350)), t.u(1), 'a')), 'un mensaje no puede pasar de 2000 caracteres');
+
+-- avisos agrupados
+select t.root();
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(3) and type = 'mensaje_nuevo' and payload ->> 'conversation_id' = t.c(t.u(350))::text), 'la tienda recibe el aviso del mensaje');
+select t.ok(not exists (select 1 from public.notifications where user_id = t.u(1) and type = 'mensaje_nuevo' and payload ->> 'conversation_id' = t.c(t.u(350))::text), 'el que escribe no se avisa a sí mismo');
+select t.ok(not exists (select 1 from public.notifications where user_id = t.u(6) and type = 'mensaje_nuevo' and payload ->> 'conversation_id' = t.c(t.u(350))::text), 'el encargado de productos (sin permiso de chat) no recibe avisos');
+select t.como(t.u(1));
+select t.ok(t.afecta(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, %L)', t.c(t.u(350)), t.u(1), 'Hola, ¿cuándo me lo pueden entregar?')) = 1, 'el comprador escribe');
+select t.root();
+select t.ok((select count(*) from public.notifications where user_id = t.u(3) and type = 'mensaje_nuevo' and read_at is null and payload ->> 'conversation_id' = t.c(t.u(350))::text) = 1, 'varios mensajes seguidos no crean varios avisos');
+select t.ok((select (payload ->> 'cantidad')::int from public.notifications where user_id = t.u(3) and type = 'mensaje_nuevo' and payload ->> 'conversation_id' = t.c(t.u(350))::text) >= 2, 'el aviso cuenta cuántos mensajes hay');
+select t.ok((select payload ->> 'para' from public.notifications where user_id = t.u(3) and type = 'mensaje_nuevo' and payload ->> 'conversation_id' = t.c(t.u(350))::text) = 'vendedor', 'el aviso indica a qué panel llevar');
+select t.como(t.u(3));
+select t.ok(t.afecta(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, %L)', t.c(t.u(350)), t.u(3), 'Hola, mañana por la tarde.')) = 1, 'la tienda responde');
+select t.ok(t.afecta(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, %L)', t.c(t.u(350)), t.u(3), 'Te escribo cuando salga.')) = 1, 'y manda otro mensaje');
+select t.root();
+select t.ok((select count(*) from public.notifications where user_id = t.u(1) and type = 'mensaje_nuevo' and read_at is null and payload ->> 'conversation_id' = t.c(t.u(350))::text) = 1, 'el comprador recibe un solo aviso agrupado');
+select t.ok((select payload ->> 'para' from public.notifications where user_id = t.u(1) and type = 'mensaje_nuevo' and payload ->> 'conversation_id' = t.c(t.u(350))::text) = 'comprador', 'y lo lleva a su panel');
+
+-- lista de conversaciones
+select t.como(t.u(1));
+select t.ok(t.n('select 1 from public.mis_conversaciones() where mi_rol = ''comprador''') >= 1, 'el comprador ve sus conversaciones');
+select t.ok((select no_leidos from public.mis_conversaciones() where conversation_id = t.c(t.u(350))) = 2, 'cuenta los mensajes sin leer');
+select t.ok((select ultimo_texto from public.mis_conversaciones() where conversation_id = t.c(t.u(350))) = 'Te escribo cuando salga.', 'muestra el último mensaje');
+select t.ok(t.falla(format('select public.marcar_conversacion_leida(%L)', t.u(999))), 'no se marca como leída una conversación inexistente');
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.mis_conversaciones() where conversation_id = %L', t.c(t.u(350)))) = 0, 'otro comprador no ve la conversación');
+select t.ok(t.falla(format('select public.marcar_conversacion_leida(%L)', t.c(t.u(350)))), 'ni puede marcarla como leída');
+select t.como(t.u(4));
+select t.ok(t.n(format('select 1 from public.mis_conversaciones() where conversation_id = %L', t.c(t.u(350)))) = 0, 'otra tienda no la ve');
+select t.como(t.u(6));
+select t.ok(t.n(format('select 1 from public.mis_conversaciones() where conversation_id = %L', t.c(t.u(350)))) = 0, 'un empleado sin permiso de chat no la ve');
+select t.como(t.u(3));
+select t.ok(t.n(format('select 1 from public.mis_conversaciones() where conversation_id = %L and mi_rol = %L', t.c(t.u(350)), 'vendedor')) = 1, 'el propietario de la tienda sí la ve como vendedor');
+select t.ok((select no_leidos from public.mis_conversaciones() where conversation_id = t.c(t.u(350))) = 2, 'y cuenta lo que le falta por leer');
+
+-- marcar como leída
+select t.como(t.u(1));
+select t.ok(t.afecta(format('select public.marcar_conversacion_leida(%L)', t.c(t.u(350)))) = 1, 'el comprador marca la conversación como leída');
+select t.ok((select no_leidos from public.mis_conversaciones() where conversation_id = t.c(t.u(350))) = 0, 'ya no tiene mensajes sin leer');
+select t.root();
+select t.ok(not exists (select 1 from public.notifications where user_id = t.u(1) and type = 'mensaje_nuevo' and read_at is null and payload ->> 'conversation_id' = t.c(t.u(350))::text), 'y su aviso quedó leído');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(3) and type = 'mensaje_nuevo' and read_at is null and payload ->> 'conversation_id' = t.c(t.u(350))::text), 'el aviso de la tienda sigue sin leer (cada persona lleva su propia lectura)');
+select t.como(t.u(1));
+select t.ok(t.falla(format('insert into public.message_reads (conversation_id, user_id) values (%L, %L)', t.c(t.u(350)), t.u(2))), 'las marcas de lectura no se escriben a mano');
+select t.ok(t.n('select 1 from public.message_reads') = 1, 'cada persona solo ve sus propias marcas');
+select t.como(t.u(2));
+select t.ok(t.n('select 1 from public.message_reads') = 0, 'otro usuario no ve marcas ajenas');
+
+-- tope de velocidad
+select t.root();
+insert into public.messages (conversation_id, sender_id, body, created_at)
+  select t.c(t.u(350)), t.u(1), 'relleno ' || g, now() from generate_series(1, 30) g;
+select t.como(t.u(1));
+select t.ok(t.falla(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, %L)', t.c(t.u(350)), t.u(1), 'demasiado rápido')), 'más de 30 mensajes por minuto se frenan');
+select t.como(t.u(3));
+select t.ok(t.afecta(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, %L)', t.c(t.u(350)), t.u(3), 'La otra persona sigue pudiendo escribir')) = 1, 'el tope es por persona');
+
+-- conversación cerrada
+select t.root();
+update public.conversations set status = 'cerrada' where id = t.c(t.u(350));
+select t.como(t.u(1));
+select t.ok(t.falla(format('insert into public.messages (conversation_id, sender_id, body) values (%L, %L, %L)', t.c(t.u(350)), t.u(1), 'ya cerrada')), 'una conversación cerrada no admite mensajes');
+select t.ok(t.n(format('select 1 from public.messages where conversation_id = %L', t.c(t.u(350)))) > 0, 'pero el historial se conserva');
+select t.root();
+update public.conversations set status = 'activa' where id = t.c(t.u(350));
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

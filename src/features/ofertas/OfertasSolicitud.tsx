@@ -143,7 +143,7 @@ export default function OfertasSolicitud() {
       const r = await supabase.rpc("elegir_oferta", { p_version: p.version.id, p_modo: p.modo });
       if (r.error) throw new Error(traducirError(r.error.message));
     },
-    onSuccess: () => { setMensaje({ texto: "¡Listo! Elegiste la oferta. La solicitud se cerró, avisamos a las demás tiendas y se abrió un chat privado con la tienda elegida (el chat y el seguimiento del pedido llegan en las siguientes etapas).", error: false }); refrescar(); },
+    onSuccess: () => { setMensaje({ texto: "¡Listo! Elegiste la oferta. La solicitud se cerró, avisamos a las demás tiendas y se abrió un chat privado con la tienda elegida. Ábrelo en la sección Chat.", error: false }); refrescar(); },
     onError: (e) => { setMensaje({ texto: e instanceof Error ? e.message : "Error", error: true }); refrescar(); },
   });
   const responder = useMutation({
@@ -201,6 +201,7 @@ export default function OfertasSolicitud() {
         <section className="space-y-2">
           <h3 className="font-display text-xl font-bold text-pino">Oferta elegida</h3>
           <ul><TarjetaOferta o={elegida} datos={d} puedeElegir={false} ocupado={false} onElegir={() => undefined} /></ul>
+          <Link to="/comprador/chat" className="inline-flex min-h-11 items-center rounded-lg bg-mercado px-4 font-bold text-white hover:bg-pino">Abrir el chat con {elegida.stores?.name}</Link>
         </section>
       )}
 

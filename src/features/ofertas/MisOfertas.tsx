@@ -77,7 +77,7 @@ export default function MisOfertas() {
                 </div>
               </div>
               {pend && <p className="rounded-lg bg-maiz-suave p-3 text-sm">Esperando la respuesta del comprador a tu propuesta de {soles(pend.price)}.</p>}
-              {f.status === "aceptada" && !pend && <p className="rounded-lg bg-hoja p-3 text-sm">El comprador eligió tu oferta. El chat y el seguimiento del pedido llegan en las siguientes etapas.</p>}
+              {f.status === "aceptada" && !pend && <p className="rounded-lg bg-hoja p-3 text-sm">El comprador eligió tu oferta. Coordina la entrega con él en el chat.</p>}
               {f.status === "rechazada" && <p className="text-sm text-suave">El comprador eligió otra oferta.</p>}
               {versiones.length > 1 && (
                 <details className="text-sm">
@@ -87,6 +87,7 @@ export default function MisOfertas() {
                   </ul>
                 </details>
               )}
+              {f.status === "aceptada" && <Link to="/vendedor/chat" className={clasesBoton("secundario")}>Ir al chat</Link>}
               {abierta && !pend && (
                 <div className="flex flex-wrap gap-2">
                   <Link to={`/vendedor/solicitudes-recibidas/${f.request_id}/oferta?tienda=${f.store_id}`} className={clasesBoton("contorno")}>Enviar nueva propuesta</Link>

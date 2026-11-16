@@ -7,4 +7,5 @@ Cómo se usan (solo desarrollo, requiere PostgreSQL local con la base de pruebas
   2. crear el rol:  create role authenticator noinherit login password 'x'; grant anon, authenticated to authenticator;
   3. ./postgrest pgrst.conf &                  -> PostgREST 12.x contra esa base
   4. python3 probar_consultas.py && python3 probar_funciones.py
+     CONV=<id de la conversación de la solicitud 350> python3 probar_chat.py
 Nada de esto se ejecuta en Supabase.

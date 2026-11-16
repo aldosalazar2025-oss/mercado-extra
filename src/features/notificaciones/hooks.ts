@@ -65,6 +65,11 @@ export function useNotificacionesEnVivo() {
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${uid}` }, () => {
           void cliente.invalidateQueries({ queryKey: ["notificaciones"] });
         })
+        // Mensajes nuevos: cada persona solo recibe los de sus conversaciones (lo decide la base de datos).
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => {
+          void cliente.invalidateQueries({ queryKey: ["chat"] });
+          void cliente.invalidateQueries({ queryKey: ["notificaciones"] });
+        })
         .subscribe();
     } catch (e) {
       console.warn("Tiempo real no disponible; se actualizará cada minuto.", e);

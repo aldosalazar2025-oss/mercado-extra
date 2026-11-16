@@ -88,3 +88,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001300_ofertas.sql`. (La Etapa 9c, `supabase/opcionales/`, sigue siendo opcional y no hace falta.)
 2. Rutas nuevas: `/comprador/mis-solicitudes/:id/ofertas`, `/vendedor/solicitudes-recibidas/:id/oferta`, y en el panel de vendedor **Enviar ofertas** y **Mis ofertas**.
 3. Para probar necesitas tres cuentas: un comprador y dos tiendas aprobadas que declaren la misma categoría.
+
+## Etapa 11: chat
+1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001400_chat.sql`.
+2. Rutas nuevas: `/comprador/chat`, `/vendedor/chat` y `/…/chat/:id`.
+3. Tiempo real: en Supabase, Database > Replication (o Realtime) comprueba que las tablas `messages` y `notifications` estén publicadas; la migración lo intenta sola.
