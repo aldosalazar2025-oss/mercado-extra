@@ -12,8 +12,9 @@
 | 8. Solicitudes de compradores | Cerrada | 294 pruebas de base de datos; aprobada por el usuario | Sí |
 | 9. Coincidencias y notificaciones | Cerrada | Aprobada por el usuario (la migración opcional de ajuste no se aplica) | Sí |
 | 10. Ofertas y negociación | Cerrada | Probada por el usuario en pantalla (varias correcciones) | Sí |
-| 11. Chat | Código listo, falta aplicar migración 0014 | Compilación OK; 437 pruebas SQL; 16 controles contra PostgREST real; canal de tiempo real verificado. Sin probar en navegador | Pendiente |
-| 12 a 19 | No iniciadas | - | - |
+| 11. Chat | Cerrada | Aprobada por el usuario | Sí |
+| 12. Pedidos y entregas | Código listo, falta aplicar migración 0015 | Compilación OK; 522 pruebas SQL; recorrido completo contra PostgREST real (30 controles); regresión de consultas, funciones y chat. Sin probar en navegador | Pendiente |
+| 13 a 19 | No iniciadas | - | - |
 
 ## Etapa 4
 Hecho: 6 migraciones (38 tablas, 83 políticas RLS, 6 buckets, catálogos), funciones de permisos por tienda, protección de campos sensibles, historial de ofertas inmutable, lectura de chat por el administrador con motivo y auditoría.
@@ -74,3 +75,10 @@ Reglas en base de datos (migración 0014): solo participantes leen y escriben (c
 Entorno de pruebas: la base ahora se crea en UTF8 como Supabase (con la codificación anterior se rechazaban tildes y emojis que llegan por JSON; era un artefacto del entorno).
 Límites conocidos: solo fotos (sin archivos ni video); las conversaciones aún no se cierran solas (llega con pedidos y cancelaciones, Etapas 12 y 14); el tiempo real requiere que Supabase Realtime esté activo (si no, se actualiza cada 15 a 30 s).
 NO probado: pantallas en navegador ni conexión de tiempo real contra un Supabase real.
+
+## Etapa 12
+Hecho: seguimiento del pedido con los 8 estados (oferta aceptada, compra coordinada, en preparación, evidencias registradas, enviado/listo para recojo, entrega en curso, entregado, operación completada) con avance paso a paso y línea de tiempo; 4 fotos obligatorias para entrega a domicilio (producto completo, detalles y estado, producto dentro del paquete, paquete cerrado; hasta 3 por tipo y 15 por pedido; quedan bloqueadas al registrar las evidencias); recojo con fotos opcionales (también al momento de la entrega); código de entrega de 6 dígitos que solo ve el comprador; confirmación de la entrega por la tienda con el código; el comprador completa la operación; lista de compras (comprador) y de pedidos y evidencias (vendedor); avisos con enlace al pedido.
+Código de entrega: se genera al marcar enviado/listo (aleatorio fuerte), vence a los 7 días, un solo uso, nunca viaja por aviso ni chat; el comprador puede generar uno nuevo (máximo 3 por pedido; el anterior deja de servir). Intentos: 5 fallos = bloqueo 15 min, 10 = 1 h, 15 = bloqueado hasta código nuevo; además 20 fallos por persona en una hora bloquean a esa persona; cada intento queda registrado y la administración puede auditarlos.
+Decisiones: la entrega en curso es un paso opcional; la dirección de entrega a domicilio se coordina por el chat (no se guarda); las fotos son evidencia de preparación, no prueba definitiva de recepción; el comprador cierra la operación manualmente (el cierre automático por calificaciones o por tiempo llega con la Etapa 13); la cancelación de pedidos llega con la Etapa 14.
+Límites conocidos: aún no hay cancelación, calificaciones ni reclamos; el vencimiento a 7 días del código no tiene recordatorios; el cierre automático de conversaciones al completar el pedido llega con las etapas siguientes.
+NO probado: pantallas en navegador ni subida real de fotos a Storage.

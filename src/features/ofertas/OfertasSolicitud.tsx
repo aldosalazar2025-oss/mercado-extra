@@ -202,6 +202,7 @@ export default function OfertasSolicitud() {
           <h3 className="font-display text-xl font-bold text-pino">Oferta elegida</h3>
           <ul><TarjetaOferta o={elegida} datos={d} puedeElegir={false} ocupado={false} onElegir={() => undefined} /></ul>
           <Link to="/comprador/chat" className="inline-flex min-h-11 items-center rounded-lg bg-mercado px-4 font-bold text-white hover:bg-pino">Abrir el chat con {elegida.stores?.name}</Link>
+          <Link to="/comprador/mis-compras" className="ml-2 inline-flex min-h-11 items-center rounded-lg border-2 border-mercado px-4 font-bold text-mercado hover:bg-hoja">Ver mi compra</Link>
         </section>
       )}
 

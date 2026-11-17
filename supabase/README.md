@@ -17,6 +17,7 @@ Todas las migraciones están en `migrations/` y se aplican **en orden** (el pref
 | `20261112001100_coincidencias.sql` | Coincidencias solicitud-tienda, avisos y topes anti-spam (Etapa 9) |
 | `20261112001300_ofertas.sql` | Ofertas, elección, historial de propuestas y fotos de ofertas (Etapa 10) |
 | `20261112001400_chat.sql` | Chat: lectura, avisos agrupados, límites y tiempo real (Etapa 11) |
+| `20261112001500_pedidos.sql` | Pedidos: pasos, evidencias fotográficas y código de entrega (Etapa 12) |
 | `20261112001200_coincidencias_ajuste.sql` | La categoría declarada manda; el aviso indica la tienda (Etapa 9) |
 
 ## Aplicarlas en tu proyecto Supabase de DESARROLLO (gratis, sin instalar nada)

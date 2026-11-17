@@ -8,4 +8,5 @@ Cómo se usan (solo desarrollo, requiere PostgreSQL local con la base de pruebas
   3. ./postgrest pgrst.conf &                  -> PostgREST 12.x contra esa base
   4. python3 probar_consultas.py && python3 probar_funciones.py
      CONV=<id de la conversación de la solicitud 350> python3 probar_chat.py
+     python3 probar_pedidos.py   (antes, insertar un pedido de prueba con id ...0901: ver el encabezado del script)
 Nada de esto se ejecuta en Supabase.

@@ -93,3 +93,8 @@ La pagina publicada debe mostrar "Supabase conectado". Entra tambien a una ruta 
 1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001400_chat.sql`.
 2. Rutas nuevas: `/comprador/chat`, `/vendedor/chat` y `/…/chat/:id`.
 3. Tiempo real: en Supabase, Database > Replication (o Realtime) comprueba que las tablas `messages` y `notifications` estén publicadas; la migración lo intenta sola.
+
+## Etapa 12: pedidos y entregas
+1. Aplica en Supabase dev (SQL Editor) `supabase/migrations/20261112001500_pedidos.sql`.
+2. Rutas nuevas: comprador `/comprador/mis-compras` y `/comprador/mis-compras/:id`; vendedor `/vendedor/pedidos`, `/vendedor/pedidos/:id` y la sección **Evidencias de entrega**.
+3. El código de entrega solo lo ve el comprador, dentro de su pedido, cuando el pedido ya fue enviado o está listo para recojo.

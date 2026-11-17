@@ -4,6 +4,7 @@ import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
 import AdminCategorias from "@/features/catalogo/AdminCategorias";
 import AdminProductos from "@/features/catalogo/AdminProductos";
 import SolicitudesRecibidas from "@/features/solicitudes/SolicitudesRecibidas";
+import ListaPedidos from "@/features/pedidos/ListaPedidos";
 import ChatPanel from "@/features/chat/ChatPanel";
 import MisOfertas from "@/features/ofertas/MisOfertas";
 import MisSolicitudes from "@/features/solicitudes/MisSolicitudes";
@@ -29,6 +30,9 @@ function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
   if (panel === "vendedor" && seccion === "Enviar ofertas") return <SolicitudesRecibidas soloPendientes />;
   if (panel === "vendedor" && seccion === "Mis ofertas") return <MisOfertas />;
   if (panel === "vendedor" && seccion === "Chat") return <ChatPanel rol="vendedor" />;
+  if (panel === "vendedor" && seccion === "Pedidos") return <ListaPedidos rol="vendedor" />;
+  if (panel === "vendedor" && seccion === "Evidencias de entrega") return <ListaPedidos rol="vendedor" soloEvidencias />;
+  if (panel === "comprador" && seccion === "Mis compras") return <ListaPedidos rol="comprador" />;
   if (panel === "comprador" && seccion === "Chat") return <ChatPanel rol="comprador" />;
   if (panel === "vendedor" && seccion === "Mis productos") return <MisProductos />;
   if (panel === "vendedor" && seccion === "Mis tiendas") return <MisTiendas />;

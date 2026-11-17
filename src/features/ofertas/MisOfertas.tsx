@@ -87,7 +87,7 @@ export default function MisOfertas() {
                   </ul>
                 </details>
               )}
-              {f.status === "aceptada" && <Link to="/vendedor/chat" className={clasesBoton("secundario")}>Ir al chat</Link>}
+              {f.status === "aceptada" && <><Link to="/vendedor/pedidos" className={clasesBoton("secundario")}>Ver el pedido</Link><Link to="/vendedor/chat" className={clasesBoton("contorno")}>Ir al chat</Link></>}
               {abierta && !pend && (
                 <div className="flex flex-wrap gap-2">
                   <Link to={`/vendedor/solicitudes-recibidas/${f.request_id}/oferta?tienda=${f.store_id}`} className={clasesBoton("contorno")}>Enviar nueva propuesta</Link>

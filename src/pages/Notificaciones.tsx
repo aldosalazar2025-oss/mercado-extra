@@ -22,6 +22,14 @@ function rutaDe(n: Notificacion): string | null {
       const para = n.payload.para === "vendedor" ? "vendedor" : "comprador";
       return cid ? `/${para}/chat/${cid}` : `/${para}/chat`;
     }
+    case "pedido_estado":
+    case "codigo_entrega":
+    case "entrega_confirmada": {
+      const oid = typeof n.payload.order_id === "string" ? n.payload.order_id : null;
+      const para = n.payload.para === "vendedor" ? "vendedor" : "comprador";
+      if (!oid) return para === "vendedor" ? "/vendedor/pedidos" : "/comprador/mis-compras";
+      return para === "vendedor" ? `/vendedor/pedidos/${oid}` : `/comprador/mis-compras/${oid}`;
+    }
     case "oferta_elegida":
     case "propuesta_respondida":
       return "/vendedor/mis-ofertas";

@@ -157,6 +157,7 @@ function Hilo({ c, rol }: { c: Conversacion; rol: Rol }) {
         </div>
         <p className="text-xs text-suave">
           Los pagos se acuerdan directamente entre comprador y vendedor; Mercado Extra no retiene dinero. No compartas contraseñas ni datos de tu banca por aquí.{" "}
+          {c.order_id && <><Link to={rol === "comprador" ? `/comprador/mis-compras/${c.order_id}` : `/vendedor/pedidos/${c.order_id}`} className="font-bold text-mercado underline">Ver el pedido</Link>{" · "}</>}
           <Link to={rol === "comprador" ? `/comprador/mis-solicitudes/${c.request_id}/ofertas` : "/vendedor/mis-ofertas"} className="font-bold text-mercado underline">
             {rol === "comprador" ? "Ver la oferta" : "Ver mi oferta"}
           </Link>

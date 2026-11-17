@@ -21,6 +21,7 @@ import ProductoDetalle from "@/pages/ProductoDetalle";
 import TiendaPublica from "@/pages/TiendaPublica";
 import ProductoEditor from "@/features/catalogo/ProductoEditor";
 import SolicitudEditor from "@/features/solicitudes/SolicitudEditor";
+import PedidoDetalle from "@/features/pedidos/PedidoDetalle";
 import ChatPanel from "@/features/chat/ChatPanel";
 import OfertasSolicitud from "@/features/ofertas/OfertasSolicitud";
 import OfertaEditor from "@/features/ofertas/OfertaEditor";
@@ -62,6 +63,8 @@ export default function App() {
         <Route element={<RequiereSesion />}>
           <Route path="/notificaciones" element={<Notificaciones />} />
           <Route path="/solicitar" element={<Solicitar />} />
+          <Route path="/comprador/mis-compras/:orderId" element={<Panel panel="comprador" seccion="Mis compras" contenido={<PedidoDetalle rol="comprador" />} />} />
+          <Route path="/vendedor/pedidos/:orderId" element={<Panel panel="vendedor" seccion="Pedidos" contenido={<PedidoDetalle rol="vendedor" />} />} />
           <Route path="/comprador/chat/:conversacionId" element={<Panel panel="comprador" seccion="Chat" contenido={<ChatPanel rol="comprador" />} />} />
           <Route path="/vendedor/chat/:conversacionId" element={<Panel panel="vendedor" seccion="Chat" contenido={<ChatPanel rol="vendedor" />} />} />
           <Route path="/comprador/mis-solicitudes/:id/ofertas" element={<Panel panel="comprador" seccion="Mis solicitudes" contenido={<OfertasSolicitud />} />} />

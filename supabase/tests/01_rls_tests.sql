@@ -911,6 +911,191 @@ select t.ok(t.n(format('select 1 from public.messages where conversation_id = %L
 select t.root();
 update public.conversations set status = 'activa' where id = t.c(t.u(350));
 
+-- 12l. Etapa 12: pedidos, evidencias y código de entrega
+select t.root();
+create function t.ord(req uuid) returns uuid language sql security definer as $$ select id from public.orders where request_id = req $$;
+create function t.cod(o uuid) returns text language sql security definer as $$ select code from public.delivery_codes where order_id = o $$;
+create table t.txt (clave text primary key, valor text);
+grant select on t.txt to public;
+update public.orders set status = 'oferta_aceptada' where request_id = t.u(350);
+
+-- permisos y orden de los pasos (pedido a domicilio)
+select t.como(t.u(2));
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'compra_coordinada')), 'otro comprador no avanza pedidos ajenos');
+select t.como(t.u(1));
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'compra_coordinada')), 'el comprador no avanza el pedido: lo hace la tienda');
+select t.como(t.u(4));
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'compra_coordinada')), 'otra tienda no avanza el pedido');
+select t.anon();
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'compra_coordinada')), 'un visitante no avanza pedidos');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'en_preparacion')), 'no se pueden saltar pasos');
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'compra_coordinada')) = 1, 'la tienda confirma la compra coordinada');
+select t.root();
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(1) and type = 'pedido_estado' and payload ->> 'order_id' = t.ord(t.u(350))::text), 'el comprador es avisado del cambio de estado');
+select t.ok(exists (select 1 from public.delivery_events where order_id = t.ord(t.u(350)) and event = 'estado' and to_status = 'compra_coordinada'), 'queda el evento en la línea de tiempo');
+
+-- evidencias fotográficas
+select t.como(t.u(3));
+select t.ok(t.afecta(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(350)), 'producto_completo', t.ord(t.u(350))::text || '/a1.jpg', t.u(3))) = 1, 'la tienda sube una foto del producto completo');
+select t.ok(t.falla(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(350)), 'producto_completo', 'otra-carpeta/x.jpg', t.u(3))), 'la foto debe estar en la carpeta del pedido');
+select t.como(t.u(1));
+select t.ok(t.falla(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(350)), 'detalle_estado', t.ord(t.u(350))::text || '/c.jpg', t.u(1))), 'el comprador no sube evidencias de la tienda');
+select t.como(t.u(4));
+select t.ok(t.falla(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(350)), 'detalle_estado', t.ord(t.u(350))::text || '/d.jpg', t.u(4))), 'otra tienda no sube evidencias de este pedido');
+select t.como(t.u(3));
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'en_preparacion')) = 1, 'la tienda empieza a preparar el pedido');
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'evidencias_registradas')), 'con una sola foto no se registran las evidencias');
+select t.ok(t.falla(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'enviado_o_listo')), 'un pedido a domicilio no se envía sin las evidencias');
+select t.ok(t.afecta(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L), (%L, %L, %L, %L), (%L, %L, %L, %L)',
+  t.ord(t.u(350)), 'detalle_estado', t.ord(t.u(350))::text || '/b1.jpg', t.u(3),
+  t.ord(t.u(350)), 'producto_en_paquete', t.ord(t.u(350))::text || '/c1.jpg', t.u(3),
+  t.ord(t.u(350)), 'paquete_cerrado', t.ord(t.u(350))::text || '/d1.jpg', t.u(3))) = 3, 'se suben las otras tres fotos obligatorias');
+select t.ok(t.afecta(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L), (%L, %L, %L, %L)',
+  t.ord(t.u(350)), 'producto_completo', t.ord(t.u(350))::text || '/a2.jpg', t.u(3), t.ord(t.u(350)), 'producto_completo', t.ord(t.u(350))::text || '/a3.jpg', t.u(3))) = 2, 'hasta 3 fotos por tipo');
+select t.ok(t.falla(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(350)), 'producto_completo', t.ord(t.u(350))::text || '/a4.jpg', t.u(3))), 'la cuarta foto del mismo tipo se rechaza');
+select t.ok(t.afecta(format('delete from public.delivery_evidence where order_id = %L and file_path = %L', t.ord(t.u(350)), t.ord(t.u(350))::text || '/a1.jpg')) = 1, 'la tienda puede quitar una foto mientras prepara');
+select t.root();
+insert into storage.objects (bucket_id, name) values ('delivery-evidence', t.ord(t.u(350))::text || '/tmp.jpg');
+select t.como(t.u(3));
+select t.ok(t.afecta($q$delete from storage.objects where bucket_id = 'delivery-evidence' and name like '%/tmp.jpg'$q$) = 1, 'y borrar el archivo mientras prepara');
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'evidencias_registradas')) = 1, 'con las 4 fotos se registran las evidencias');
+select t.ok(t.falla(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(350)), 'detalle_estado', t.ord(t.u(350))::text || '/b2.jpg', t.u(3))), 'registradas las evidencias ya no se agregan fotos');
+select t.ok(t.afecta(format('delete from public.delivery_evidence where order_id = %L', t.ord(t.u(350)))) = 0, 'ni se borran');
+select t.como(t.u(1));
+select t.ok(t.n(format('select 1 from public.delivery_evidence where order_id = %L', t.ord(t.u(350)))) = 5, 'el comprador revisa las fotos del pedido');
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.delivery_evidence where order_id = %L', t.ord(t.u(350)))) = 0, 'otro comprador no las ve');
+
+-- envío y código de entrega
+select t.como(t.u(3));
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'enviado_o_listo')) = 1, 'la tienda marca el pedido como enviado');
+select t.root();
+select t.ok((select code ~ '^[0-9]{6}$' and expires_at > now() + interval '6 days' and generaciones = 1 and attempts = 0 and used_at is null from public.delivery_codes where order_id = t.ord(t.u(350))), 'se genera un código de 6 dígitos con vencimiento');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(1) and type = 'codigo_entrega' and payload ->> 'order_id' = t.ord(t.u(350))::text), 'el comprador recibe el aviso del código');
+select t.ok(not exists (select 1 from public.notifications where payload ->> 'order_id' = t.ord(t.u(350))::text and body like '%' || t.cod(t.ord(t.u(350))) || '%'), 'el aviso nunca contiene el código');
+select t.ok(not exists (select 1 from public.notifications where user_id = t.u(3) and type = 'codigo_entrega'), 'la tienda no recibe el código');
+select t.como(t.u(1));
+select t.ok((select codigo from public.obtener_codigo_entrega(t.ord(t.u(350)))) = t.cod(t.ord(t.u(350))), 'el comprador ve su código');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select * from public.obtener_codigo_entrega(%L)', t.ord(t.u(350)))), 'la tienda NO puede ver el código');
+select t.como(t.u(2));
+select t.ok(t.falla(format('select * from public.obtener_codigo_entrega(%L)', t.ord(t.u(350)))), 'otro comprador tampoco');
+select t.como(t.u(3));
+select t.ok(t.falla('select * from public.delivery_codes'), 'ni la tabla de códigos se puede leer');
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(350)), 'pendiente_confirmacion')) = 1, 'la tienda indica que está entregando');
+
+-- confirmar la entrega
+select t.como(t.u(1));
+select t.ok(t.falla(format('select public.confirmar_entrega(%L, %L)', t.ord(t.u(350)), t.cod(t.ord(t.u(350))))), 'el comprador no confirma su propia entrega');
+select t.como(t.u(4));
+select t.ok(t.falla(format('select public.confirmar_entrega(%L, %L)', t.ord(t.u(350)), '123456')), 'otra tienda no confirma entregas ajenas');
+select t.como(t.u(3));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), 'abc') ->> 'resultado') = 'formato', 'un código mal escrito se avisa sin contar intento');
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), case when t.cod(t.ord(t.u(350))) = '111111' then '222222' else '111111' end) ->> 'resultado') = 'incorrecto', 'un código incorrecto no confirma la entrega');
+select t.root();
+select t.ok((select attempts = 1 from public.delivery_codes where order_id = t.ord(t.u(350))) and (select count(*) from public.delivery_code_attempts where order_id = t.ord(t.u(350)) and not success) = 1, 'el intento fallido queda registrado');
+select t.ok((select status from public.orders where id = t.ord(t.u(350))) = 'pendiente_confirmacion', 'el pedido sigue sin entregarse');
+select t.como(t.u(3));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), case when t.cod(t.ord(t.u(350))) = '111111' then '222222' else '111111' end) ->> 'intentos_restantes')::int = 3, 'se informa cuántos intentos quedan');
+select public.confirmar_entrega(t.ord(t.u(350)), case when t.cod(t.ord(t.u(350))) = '111111' then '222222' else '111111' end);
+select public.confirmar_entrega(t.ord(t.u(350)), case when t.cod(t.ord(t.u(350))) = '111111' then '222222' else '111111' end);
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), case when t.cod(t.ord(t.u(350))) = '111111' then '222222' else '111111' end) ->> 'resultado') = 'bloqueado', 'al quinto fallo el código se bloquea');
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), t.cod(t.ord(t.u(350)))) ->> 'resultado') = 'bloqueado', 'bloqueado, ni el código correcto sirve');
+select t.root();
+select t.ok((select status from public.orders where id = t.ord(t.u(350))) = 'pendiente_confirmacion', 'un pedido con el código bloqueado no se entrega');
+select t.ok((select count(*) from public.delivery_code_attempts where order_id = t.ord(t.u(350)) and not success) = 5, 'los cinco fallos quedan registrados');
+insert into t.txt values ('viejo', t.cod(t.ord(t.u(350))));
+
+-- el comprador genera un código nuevo
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.regenerar_codigo_entrega(%L)', t.ord(t.u(350)))), 'la tienda no genera códigos');
+select t.como(t.u(1));
+select t.ok(t.afecta(format('select public.regenerar_codigo_entrega(%L)', t.ord(t.u(350)))) = 1, 'el comprador genera un código nuevo');
+select t.root();
+select t.ok((select code <> (select valor from t.txt where clave = 'viejo') and attempts = 0 and locked_until is null and generaciones = 2 from public.delivery_codes where order_id = t.ord(t.u(350))), 'el nuevo código reinicia los intentos y el anterior deja de servir');
+select t.ok(exists (select 1 from public.delivery_events where order_id = t.ord(t.u(350)) and event = 'codigo_regenerado'), 'queda registrado en la línea de tiempo');
+select t.como(t.u(3));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), (select valor from t.txt where clave = 'viejo')) ->> 'resultado') = 'incorrecto', 'el código anterior ya no sirve');
+
+-- código vencido
+select t.root();
+update public.delivery_codes set expires_at = now() - interval '1 minute', attempts = 0 where order_id = t.ord(t.u(350));
+select t.como(t.u(3));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), t.cod(t.ord(t.u(350)))) ->> 'resultado') = 'vencido', 'un código vencido no confirma la entrega');
+select t.root();
+update public.delivery_codes set expires_at = now() + interval '7 days' where order_id = t.ord(t.u(350));
+
+-- entrega correcta
+select t.como(t.u(3));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(350)), t.cod(t.ord(t.u(350)))) ->> 'resultado') = 'correcto', 'con el código correcto se confirma la entrega');
+select t.root();
+select t.ok((select status = 'entregado' from public.orders where id = t.ord(t.u(350))), 'el pedido pasa a entregado');
+select t.ok((select used_at is not null from public.delivery_codes where order_id = t.ord(t.u(350))), 'el código queda usado');
+select t.ok(exists (select 1 from public.delivery_events where order_id = t.ord(t.u(350)) and event = 'entrega_confirmada'), 'queda el evento de entrega confirmada');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(1) and type = 'entrega_confirmada' and payload ->> 'order_id' = t.ord(t.u(350))::text), 'el comprador es avisado de la entrega');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.confirmar_entrega(%L, %L)', t.ord(t.u(350)), t.cod(t.ord(t.u(350))))), 'un código usado no se puede usar otra vez');
+select t.ok(t.falla(format('insert into storage.objects (bucket_id, name) values (%L, %L)', 'delivery-evidence', t.ord(t.u(350))::text || '/tarde.jpg')), 'entregado el pedido ya no se suben archivos');
+select t.como(t.u(1));
+select t.ok((select usado and codigo is null from public.obtener_codigo_entrega(t.ord(t.u(350)))), 'el comprador ya no ve el código, solo que fue usado');
+
+-- auditoría de los intentos
+select t.como(t.u(7));
+select t.ok(t.n(format('select 1 from public.delivery_code_attempts where order_id = %L', t.ord(t.u(350)))) >= 7, 'la administración audita todos los intentos');
+select t.como(t.u(3));
+select t.ok(t.n('select 1 from public.delivery_code_attempts') = 0, 'la tienda no ve los intentos');
+select t.como(t.u(1));
+select t.ok(t.n('select 1 from public.delivery_code_attempts') = 0, 'el comprador tampoco');
+
+-- completar la operación
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.completar_pedido(%L)', t.ord(t.u(350)))), 'la tienda no completa la operación');
+select t.como(t.u(2));
+select t.ok(t.falla(format('select public.completar_pedido(%L)', t.ord(t.u(350)))), 'otro comprador tampoco');
+select t.como(t.u(1));
+select t.ok(t.afecta(format('select public.completar_pedido(%L)', t.ord(t.u(350)))) = 1, 'el comprador completa la operación');
+select t.ok(t.falla(format('select public.completar_pedido(%L)', t.ord(t.u(350)))), 'y no se completa dos veces');
+select t.root();
+select t.ok((select status = 'completada' from public.orders where id = t.ord(t.u(350))), 'el pedido queda completado');
+select t.ok(exists (select 1 from public.notifications where user_id = t.u(3) and type = 'pedido_estado' and title = 'Operación completada'), 'la tienda es avisada');
+
+-- recojo en tienda: sin fotos obligatorias
+select t.como(t.u(4));
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(351)), 'compra_coordinada')) = 1, 'recojo: compra coordinada');
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(351)), 'en_preparacion')) = 1, 'recojo: en preparación');
+select t.ok(t.afecta(format('select public.avanzar_pedido(%L, %L)', t.ord(t.u(351)), 'enviado_o_listo')) = 1, 'un pedido para recojo puede quedar listo sin las 4 fotos');
+select t.ok(t.afecta(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(351)), 'recojo', t.ord(t.u(351))::text || '/r1.jpg', t.u(4))) = 1, 'en recojo se pueden adjuntar fotos de la entrega');
+select t.ok(t.falla(format('insert into public.delivery_evidence (order_id, type, file_path, uploaded_by) values (%L, %L, %L, %L)', t.ord(t.u(351)), 'producto_completo', t.ord(t.u(351))::text || '/r2.jpg', t.u(4))), 'pero no otros tipos una vez listo');
+select t.root();
+select t.ok(exists (select 1 from public.delivery_codes where order_id = t.ord(t.u(351))), 'el pedido para recojo también tiene su código');
+select t.como(t.u(1));
+select t.ok(t.afecta(format('select public.regenerar_codigo_entrega(%L)', t.ord(t.u(351)))) = 1, 'segundo código');
+select t.ok(t.afecta(format('select public.regenerar_codigo_entrega(%L)', t.ord(t.u(351)))) = 1, 'tercer código');
+select t.ok(t.falla(format('select public.regenerar_codigo_entrega(%L)', t.ord(t.u(351)))), 'no se pueden generar más de 3 códigos');
+
+-- tope por persona contra intentos automatizados
+select t.root();
+insert into public.delivery_code_attempts (order_id, user_id, success, attempted_at)
+  select t.ord(t.u(351)), t.u(4), false, now() - interval '5 minutes' from generate_series(1, 20);
+select t.como(t.u(4));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(351)), t.cod(t.ord(t.u(351)))) ->> 'resultado') = 'bloqueado', 'muchos fallos seguidos de una persona la bloquean, incluso con el código correcto');
+select t.root();
+delete from public.delivery_code_attempts where order_id = t.ord(t.u(351)) and not success;
+select t.como(t.u(4));
+select t.ok((select public.confirmar_entrega(t.ord(t.u(351)), t.cod(t.ord(t.u(351)))) ->> 'resultado') = 'correcto', 'pasado el bloqueo, el código correcto entrega el pedido');
+
+-- lista de pedidos
+select t.como(t.u(1));
+select t.ok(t.n($q$select 1 from public.mis_pedidos() where mi_rol = 'comprador'$q$) >= 2, 'el comprador ve sus compras');
+select t.como(t.u(3));
+select t.ok((select fotos_obligatorias = 4 and codigo_generado and codigo_usado and estado = 'completada' from public.mis_pedidos() where order_id = t.ord(t.u(350))), 'la tienda ve el pedido con fotos, código y estado');
+select t.ok((select mi_rol = 'vendedor' and conversation_id is not null from public.mis_pedidos() where order_id = t.ord(t.u(350))), 'y lo enlaza con su conversación');
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.mis_pedidos() where order_id = %L', t.ord(t.u(350)))) = 0, 'otro comprador no ve pedidos ajenos');
+select t.como(t.u(6));
+select t.ok(t.n(format('select 1 from public.mis_pedidos() where order_id = %L', t.ord(t.u(350)))) = 0, 'un empleado sin permiso de pedidos no los ve');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
