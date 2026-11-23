@@ -39,14 +39,16 @@ export function useMensajes(conversacionId: string, limite: number) {
 }
 
 // Las fotos del chat están en un bucket privado: se muestran con enlaces temporales.
-export function useFotoChat(path: string | null) {
+export function useFotoChat(path: string | null, auditoria = false) {
+  const { session } = useAuth();
+  const uid = session?.user.id;
   return useQuery({
-    queryKey: ["chat", "foto", path],
-    enabled: Boolean(path && supabase),
-    staleTime: 50 * 60 * 1000,
+    queryKey: ["chat", "foto", uid, path, auditoria],
+    enabled: Boolean(uid && path && supabase),
+    staleTime: (auditoria ? 4 : 50) * 60 * 1000,
     queryFn: async (): Promise<string | null> => {
       if (!supabase || !path) return null;
-      const { data } = await supabase.storage.from("chat-private").createSignedUrl(path, 3600);
+      const { data } = await supabase.storage.from("chat-private").createSignedUrl(path, auditoria ? 300 : 3600);
       return data?.signedUrl ?? null;
     },
   });

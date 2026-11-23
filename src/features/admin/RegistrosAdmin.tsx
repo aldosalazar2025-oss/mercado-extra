@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import Boton from "@/components/Boton";
+import Boton, { clasesBoton } from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import { FormularioCaso } from "@/features/reclamos/FormularioCaso";
 import { accion } from "@/features/reclamos/casos";
@@ -26,8 +26,8 @@ const texto = (f: Registro, campo: string) => typeof f[campo] === "string" ? Str
 const etiqueta = (valor: unknown) => String(valor ?? "").replace(/_/g, " ");
 const fecha = (valor: string) => new Date(valor).toLocaleString("es-PE");
 
-function Referencia({ seccion, id, nombre }: { seccion: string; id: string; nombre: string }) {
-  return <Link className="font-bold text-mercado underline" to={`/admin/${seccion}?id=${id}`}>{nombre}</Link>;
+function Referencia({ seccion, id, nombre, comoBoton = false }: { seccion: string; id: string; nombre: string; comoBoton?: boolean }) {
+  return <Link className={comoBoton ? clasesBoton("contorno") : "font-bold text-mercado underline"} to={`/admin/${seccion}?id=${id}`}>{nombre}</Link>;
 }
 
 const estadoCuenta = [
@@ -56,7 +56,7 @@ const fichas: Record<string, Ficha> = {
     detalle: (f) => <>
       <p>Presupuesto máximo · {soles(Number(f.max_budget))}</p>
       {f.description && <p className="whitespace-pre-wrap break-words">{texto(f, "description")}</p>}
-      <Referencia seccion="usuarios" id={texto(f, "buyer_id")} nombre="Ver comprador" />
+      <Referencia seccion="usuarios" id={texto(f, "buyer_id")} nombre="Ver comprador" comoBoton />
     </>,
   },
   Ofertas: {
@@ -70,7 +70,7 @@ const fichas: Record<string, Ficha> = {
         {version && <p>{soles(Number(version.price))}</p>}
         {version?.description && <p className="whitespace-pre-wrap break-words">{version.description}</p>}
         {version?.delivery_terms && <p className="whitespace-pre-wrap break-words">{version.delivery_terms}</p>}
-        <Referencia seccion="solicitudes" id={texto(f, "request_id")} nombre="Ver solicitud" />
+        <Referencia seccion="solicitudes" id={texto(f, "request_id")} nombre="Ver solicitud" comoBoton />
       </>;
     },
   },
@@ -82,8 +82,8 @@ const fichas: Record<string, Ficha> = {
     detalle: (f) => <>
       <p>{(f.stores as { name: string } | null)?.name ?? "Tienda"} · {soles(Number(f.agreed_price))} · {texto(f, "delivery_mode") === "recojo" ? "Recojo" : "Domicilio"}</p>
       <div className="flex flex-wrap gap-3">
-        <Referencia seccion="solicitudes" id={texto(f, "request_id")} nombre="Ver solicitud" />
-        <Referencia seccion="usuarios" id={texto(f, "buyer_id")} nombre="Ver comprador" />
+        <Referencia seccion="solicitudes" id={texto(f, "request_id")} nombre="Ver solicitud" comoBoton />
+        <Referencia seccion="usuarios" id={texto(f, "buyer_id")} nombre="Ver comprador" comoBoton />
       </div>
     </>,
   },

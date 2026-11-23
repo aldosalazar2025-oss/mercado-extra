@@ -305,4 +305,44 @@ $$;
 revoke execute on function public.contexto_pedido_reclamo(uuid) from public, anon;
 grant execute on function public.contexto_pedido_reclamo(uuid) to authenticated;
 
+-- La revisión administrativa concede acceso temporal solo a adjuntos del hilo auditado.
+create or replace function public.registrar_auditoria(p_action text, p_entity text, p_entity_id text default null, p_metadata jsonb default '{}'::jsonb)
+returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if not (public.es_servicio() or public.is_admin()) or p_action = 'admin_leer_chat' then
+    raise exception 'Acción de auditoría no disponible para registro manual' using errcode = '42501';
+  end if;
+  insert into public.audit_logs (actor_id, action, entity, entity_id, metadata)
+  values (auth.uid(), p_action, p_entity, p_entity_id, coalesce(p_metadata, '{}'::jsonb));
+end $$;
+
+create or replace function public.admin_puede_ver_foto_chat(p_path text) returns boolean
+language sql stable security definer set search_path = public, pg_temp as $$
+  select public.is_admin() and exists (
+    select 1
+    from public.messages m
+    join public.conversations c on c.id = m.conversation_id
+    where m.conversation_id = public.try_uuid(split_part(p_path, '/', 1)) and m.image_path = p_path
+      and (exists (select 1 from public.claims r where r.order_id = c.order_id)
+        or exists (select 1 from public.cancellations x where x.order_id = c.order_id and x.review_status <> 'sin_revision'))
+      and exists (
+        select 1 from public.audit_logs a
+        where a.actor_id = auth.uid() and a.action = 'admin_leer_chat' and a.entity = 'conversations'
+          and a.entity_id = c.id::text and a.created_at > now() - interval '15 minutes'
+          and a.created_at >= m.created_at
+      )
+  )
+$$;
+
+revoke execute on function public.admin_puede_ver_foto_chat(text) from public, anon;
+grant execute on function public.admin_puede_ver_foto_chat(text) to authenticated;
+
+alter policy chat_img_leer on storage.objects using (
+  bucket_id = 'chat-private' and (
+    public.can_access_conversation(public.try_uuid((storage.foldername(name))[1]))
+    or public.admin_puede_ver_foto_chat(name)
+  )
+);
+
 commit;

@@ -13,6 +13,8 @@ type Base = { id: string; created_at: string };
 type Reclamo = Base & {
   order_id: string; buyer_id: string; store_id: string; type: string; description: string; status: string; resolution: string | null;
   resolution_note: string | null;
+  comprador: { full_name: string } | null;
+  tienda: { name: string } | null;
   claim_evidence: { file_path: string }[];
   claim_responses: { id: string; author_id: string; body: string; created_at: string }[];
 };
@@ -51,20 +53,29 @@ function FichaReclamo({ caso, rol, uid, puedeResponder }: { caso: Reclamo; rol: 
     <article className="space-y-3 rounded-xl border border-borde bg-white p-4">
       <h3 className="font-display text-lg font-bold text-pino">{tiposReclamo.find(([id]) => id === caso.type)?.[1] ?? etiqueta(caso.type)}</h3>
       <p className="text-sm text-suave capitalize">{etiqueta(caso.status)} · {fecha(caso.created_at)}</p>
-      <p className="whitespace-pre-wrap break-words">{caso.description}</p>
+      <section className="space-y-1 rounded-lg border border-borde bg-white p-3">
+        <h4 className="font-bold text-pino">Reclamo del comprador{caso.comprador?.full_name && ` · ${caso.comprador.full_name}`}</h4>
+        {caso.tienda?.name && <p className="text-sm text-suave">Tienda reclamada · {caso.tienda.name}</p>}
+        <p className="whitespace-pre-wrap break-words">{caso.description}</p>
+      </section>
       {rol === "admin"
-        ? <ContextoPedido key={caso.order_id} id={caso.order_id} />
+        ? <ContextoPedido key={caso.order_id} id={caso.order_id} compradorId={caso.buyer_id} comprador={caso.comprador?.full_name} />
         : <Link className="text-sm font-bold text-mercado underline" to={rutaPedido(rol, caso.order_id)}>Ver pedido</Link>}
-      {caso.resolution && <p className="font-bold">{resoluciones.find(([id]) => id === caso.resolution)?.[1] ?? etiqueta(caso.resolution)}</p>}
-      {caso.resolution_note && <p className="whitespace-pre-wrap break-words">{caso.resolution_note}</p>}
       <ArchivosCaso rutas={caso.claim_evidence.map((archivo) => archivo.file_path)} />
-      {respuestas.length > 0 && <div className="space-y-2 rounded-lg bg-hoja p-3">
-        <p className="font-bold">Actividad del reclamo</p>
+      <section className="space-y-2 rounded-lg bg-hoja p-3">
+        <h4 className="font-bold text-pino">Respuestas al reclamo</h4>
+        {respuestas.length === 0 && <p className="text-sm text-suave">Todavía no hay respuestas.</p>}
         {respuestas.map((r) => <div key={r.id}>
-          <p className="text-sm text-suave">{r.author_id === uid ? "Tú" : r.author_id === caso.buyer_id ? "Comprador" : "Participante del caso"} · {fecha(r.created_at)}</p>
+          <p className="text-sm text-suave">{r.author_id === caso.buyer_id ? "Comentario del comprador" : "Respuesta de la tienda"}
+            {r.author_id === uid ? " (tú)" : r.author_id === caso.buyer_id && caso.comprador?.full_name ? ` · ${caso.comprador.full_name}` : r.author_id !== caso.buyer_id && caso.tienda?.name ? ` · ${caso.tienda.name}` : ""} · {fecha(r.created_at)}</p>
           <p className="whitespace-pre-wrap break-words text-sm">{r.body}</p>
         </div>)}
-      </div>}
+      </section>
+      {caso.resolution && <section className="space-y-1 rounded-lg border border-borde bg-white p-3">
+        <h4 className="font-bold text-pino">Decisión administrativa</h4>
+        <p className="font-semibold">{resoluciones.find(([id]) => id === caso.resolution)?.[1] ?? etiqueta(caso.resolution)}</p>
+        {caso.resolution_note && <p className="whitespace-pre-wrap break-words">{caso.resolution_note}</p>}
+      </section>}
       {abierto && <AdjuntarEvidencia id={caso.id} uid={uid} />}
       {abierto && puedeResponder && caso.buyer_id !== uid && (
         <FormularioCaso titulo="Responder al reclamo" minimo={1} repetir ejecutar={async (texto) => {
@@ -145,7 +156,7 @@ function FichaSancion({ caso, rol }: { caso: Sancion; rol: Rol }) {
 
 type Clase = "reclamo" | "cancelacion" | "sancion";
 const select: Record<Clase, string> = {
-  reclamo: "id,order_id,buyer_id,store_id,type,description,status,resolution,resolution_note,created_at,claim_evidence(file_path),claim_responses(id,author_id,body,created_at)",
+  reclamo: "id,order_id,buyer_id,store_id,type,description,status,resolution,resolution_note,created_at,comprador:profiles!claims_buyer_id_fkey(full_name),tienda:stores!claims_store_id_fkey(name),claim_evidence(file_path),claim_responses(id,author_id,body,created_at)",
   cancelacion: "id,order_id,request_id,cancelled_by,reason_code,reason_text,review_status,report_text,response_text,review_note,evidence_paths,created_at",
   sancion: "id,user_id,type,reason,ends_at,source_type,source_id,appeal_text,appeal_status,created_at",
 };

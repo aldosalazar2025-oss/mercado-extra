@@ -6,32 +6,11 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { comprimirImagen } from "@/lib/imagen";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
-import { useConversaciones, useFotoChat, useMensajes } from "./hooks";
-import { etiquetaDia, etiquetaPedido, hora, traducirErrorChat, type Conversacion, type Mensaje } from "./tipos";
+import { useConversaciones, useMensajes } from "./hooks";
+import Burbuja from "./Burbuja";
+import { etiquetaDia, etiquetaPedido, hora, traducirErrorChat, type Conversacion } from "./tipos";
 
 type Rol = "comprador" | "vendedor";
-
-function FotoMensaje({ path }: { path: string }) {
-  const { data, isLoading } = useFotoChat(path);
-  if (isLoading || !data) return <div className="h-40 w-56 rounded-lg bg-hoja" aria-label="Cargando foto" />;
-  return (
-    <a href={data} target="_blank" rel="noreferrer" aria-label="Abrir la foto en tamaño completo">
-      <img src={data} alt="Foto enviada en el chat" className="max-h-64 max-w-full rounded-lg object-cover" loading="lazy" />
-    </a>
-  );
-}
-
-function Burbuja({ m, mio }: { m: Mensaje; mio: boolean }) {
-  return (
-    <li className={`flex ${mio ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[85%] space-y-1 rounded-2xl px-3 py-2 ${mio ? "rounded-br-sm bg-mercado text-white" : "rounded-bl-sm border border-borde bg-white"}`}>
-        {m.image_path && <FotoMensaje path={m.image_path} />}
-        {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
-        <p className={`text-right text-xs ${mio ? "text-white/80" : "text-suave"}`}>{hora(m.created_at)}</p>
-      </div>
-    </li>
-  );
-}
 
 function Compositor({ c, uid, alEnviar }: { c: Conversacion; uid: string; alEnviar: () => void }) {
   const [texto, setTexto] = useState("");

@@ -1297,6 +1297,25 @@ select public.admin_estado_usuario(t.u(2), 'activo', 'Reactivación manual de un
 select t.como(t.u(2));
 select t.ok(public.cuenta_activa(), 'el administrador puede habilitar una cuenta suspendida');
 
+-- Etapa 14. Lectura auditada de imágenes del chat de un reclamo.
+select t.root();
+update public.audit_logs set created_at = now() - interval '16 minutes' where action = 'admin_leer_chat';
+insert into public.messages (conversation_id, sender_id, image_path)
+  values (t.u(601), t.u(3), t.u(601)::text || '/foto.jpg');
+select t.como(t.u(7));
+select t.ok(t.n($q$select 1 from storage.objects where bucket_id = 'chat-private'$q$) = 0,
+  'el administrador no ve imágenes del chat antes de una consulta auditada vigente');
+select t.ok(t.falla(format('select public.registrar_auditoria(%L, %L, %L)', 'admin_leer_chat', 'conversations', t.u(601))),
+  'el administrador no puede registrar manualmente una consulta de chat');
+select count(*) from public.admin_leer_chat(t.u(601), 'Consultar evidencias del reclamo QA');
+select t.ok(t.n($q$select 1 from storage.objects where bucket_id = 'chat-private'$q$) = 1,
+  'el administrador puede abrir la imagen del reclamo después de registrar la consulta');
+select t.ok(not public.admin_puede_ver_foto_chat(t.u(601)::text || '/otra.jpg'),
+  'la consulta no habilita imágenes fuera de los mensajes del chat');
+select t.como(t.u(4));
+select t.ok(t.n($q$select 1 from storage.objects where bucket_id = 'chat-private'$q$) = 0,
+  'una cuenta ajena no hereda el acceso temporal del administrador');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

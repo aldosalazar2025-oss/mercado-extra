@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Boton from "@/components/Boton";
 import Campo from "@/components/Campo";
@@ -9,6 +9,49 @@ import { supabase } from "@/lib/supabase";
 import { esDniValido, esNombreValido, esTelefonoValido } from "@/lib/validaciones";
 
 type Errores = Partial<Record<"nombre" | "dni" | "telefono" | "fotoDni" | "selfie" | "consentimiento", string>>;
+
+type CampoFotoProps = {
+  titulo: string;
+  ayuda: string;
+  capture: "environment" | "user";
+  archivo: File | null;
+  error?: string;
+  deshabilitado: boolean;
+  elegir: (archivo: File) => void;
+};
+
+function CampoFoto({ titulo, ayuda, capture, archivo, error, deshabilitado, elegir }: CampoFotoProps) {
+  const selector = useRef<HTMLInputElement>(null);
+  const [miniatura, setMiniatura] = useState("");
+  useEffect(() => {
+    if (!archivo) return;
+    const url = URL.createObjectURL(archivo);
+    setMiniatura(url);
+    return () => URL.revokeObjectURL(url);
+  }, [archivo]);
+
+  return (
+    <fieldset className="space-y-2">
+      <legend className="font-bold">{titulo}</legend>
+      <input ref={selector} type="file" accept="image/jpeg,image/png,image/webp" capture={capture} hidden
+        onChange={(e) => {
+          const foto = e.currentTarget.files?.[0];
+          if (foto) elegir(foto);
+          e.currentTarget.value = "";
+        }} />
+      <div className="flex flex-wrap items-start gap-3">
+        {archivo && miniatura && (
+          <img src={miniatura} alt={`Vista previa: ${titulo}`}
+            className="h-28 w-32 rounded-lg border border-borde bg-hoja object-contain" />
+        )}
+        <Boton type="button" variante="contorno" disabled={deshabilitado}
+          aria-label={`${archivo ? "Cambiar" : "Añadir"}: ${titulo}`}
+          onClick={() => selector.current?.click()}>{archivo ? "Cambiar foto" : "+ Añadir"}</Boton>
+      </div>
+      {error ? <p role="alert" className="text-sm font-semibold text-error">{error}</p> : <p className="text-sm text-suave">{ayuda}</p>}
+    </fieldset>
+  );
+}
 
 export default function Registro() {
   const { session, perfil, verificacion, recargar } = useAuth();
@@ -110,8 +153,12 @@ export default function Registro() {
         <Campo etiqueta="Nombres y apellidos" value={nombre} onChange={(e) => setNombre(e.target.value)} autoComplete="name" error={errores.nombre} />
         <Campo etiqueta="Número de DNI" inputMode="numeric" maxLength={8} value={dni} onChange={(e) => setDni(e.target.value.replace(/\D/g, ""))} error={errores.dni} />
         <Campo etiqueta="Celular (opcional)" inputMode="tel" maxLength={9} value={telefono} onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ""))} error={errores.telefono} />
-        <Campo etiqueta="Foto del frente de tu DNI" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e) => setFotoDni(e.target.files?.[0] ?? null)} ayuda="Que se lea bien, sin reflejos." error={errores.fotoDni} />
-        <Campo etiqueta="Selfie de tu rostro" type="file" accept="image/jpeg,image/png,image/webp" capture="user" onChange={(e) => setSelfie(e.target.files?.[0] ?? null)} ayuda="De frente, con buena luz y sin lentes oscuros." error={errores.selfie} />
+        <CampoFoto titulo="Foto del frente de tu DNI" capture="environment" archivo={fotoDni} deshabilitado={enviando}
+          elegir={(foto) => { setFotoDni(foto); setErrores((previos) => ({ ...previos, fotoDni: undefined })); }}
+          ayuda="Que se lea bien, sin reflejos." error={errores.fotoDni} />
+        <CampoFoto titulo="Selfie de tu rostro" capture="user" archivo={selfie} deshabilitado={enviando}
+          elegir={(foto) => { setSelfie(foto); setErrores((previos) => ({ ...previos, selfie: undefined })); }}
+          ayuda="De frente, con buena luz y sin lentes oscuros." error={errores.selfie} />
         <div>
           <label className="flex items-start gap-3">
             <input type="checkbox" className="mt-1 h-5 w-5 accent-[#1e6b45]" checked={consiento} onChange={(e) => setConsiento(e.target.checked)} />
