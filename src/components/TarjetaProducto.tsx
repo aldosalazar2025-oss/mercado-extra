@@ -3,7 +3,7 @@ import type { ProductoCatalogo } from "@/features/catalogo/tipos";
 import { km, soles } from "@/lib/format";
 import { urlPublica } from "@/lib/storage";
 
-export default function TarjetaProducto({ p }: { p: ProductoCatalogo }) {
+export default function TarjetaProducto({ p, promocionado = false }: { p: ProductoCatalogo; promocionado?: boolean }) {
   const foto = urlPublica(p.image_path);
   return (
     <article className="flex flex-col overflow-hidden rounded-xl border border-borde bg-white">
@@ -17,6 +17,7 @@ export default function TarjetaProducto({ p }: { p: ProductoCatalogo }) {
         )}
       </Link>
       <div className="flex flex-1 flex-col gap-2 p-4">
+        {promocionado && <span className="w-fit rounded-full bg-maiz-suave px-2 py-0.5 text-xs font-bold">Promocionado</span>}
         <h3 className="font-display text-lg font-bold leading-snug">
           <Link to={`/productos/${p.id}`} className="hover:underline">{p.name}</Link>
         </h3>

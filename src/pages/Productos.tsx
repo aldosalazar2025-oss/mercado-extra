@@ -4,6 +4,7 @@ import Boton from "@/components/Boton";
 import Campo, { estiloInput } from "@/components/Campo";
 import TarjetaProducto from "@/components/TarjetaProducto";
 import { TAM_PAGINA, buscarProductos, filtrosVacios, useCategorias, type Filtros } from "@/features/catalogo/hooks";
+import { usePromocionesPublicas } from "@/features/monetizacion/datos";
 import { pedirUbicacion } from "@/lib/geo";
 
 export default function Productos() {
@@ -19,6 +20,8 @@ export default function Productos() {
     getNextPageParam: (ultima, todas) => (ultima.length === TAM_PAGINA ? todas.length * TAM_PAGINA : undefined),
   });
   const productos = consulta.data?.pages.flat() ?? [];
+
+  const promociones = usePromocionesPublicas("productos", productos.map((p) => p.id));
 
   function cambiar<K extends keyof Filtros>(k: K, v: Filtros[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -95,7 +98,7 @@ export default function Productos() {
       {!consulta.isLoading && !consulta.error && productos.length === 0 && (
         <p className="rounded-xl bg-white p-6 text-suave">No encontramos productos con esos filtros. Prueba quitar alguno, o publica una solicitud para que las tiendas te ofrezcan lo que buscas.</p>
       )}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{productos.map((p) => <TarjetaProducto key={p.id} p={p} />)}</div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{productos.map((p) => <TarjetaProducto key={p.id} p={p} promocionado={promociones.data?.has(p.id)} />)}</div>
       {consulta.hasNextPage && (
         <div className="text-center">
           <Boton variante="contorno" onClick={() => void consulta.fetchNextPage()} disabled={consulta.isFetchingNextPage}>{consulta.isFetchingNextPage ? "Cargando…" : "Ver más productos"}</Boton>

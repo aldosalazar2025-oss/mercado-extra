@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
 import Campo, { estiloInput } from "@/components/Campo";
 import TarjetaTienda, { type TiendaCard } from "@/components/TarjetaTienda";
+import { usePromocionesPublicas } from "@/features/monetizacion/datos";
 import { useCategorias } from "@/features/catalogo/hooks";
 import { distanciaKm, pedirUbicacion, type Ubicacion } from "@/lib/geo";
 import { supabase } from "@/lib/supabase";
@@ -48,6 +49,8 @@ export default function Tiendas() {
     return ubicacion ? filas.sort((a, b) => (a.distanciaKm ?? 1e9) - (b.distanciaKm ?? 1e9)) : filas;
   }, [consulta.data, texto, categoria, ubicacion]);
 
+  const promociones = usePromocionesPublicas("tiendas", lista.map((t) => t.id));
+
   async function cerca() {
     setAviso(null);
     try { setUbicacion(await pedirUbicacion()); } catch (e) { setAviso(e instanceof Error ? e.message : "No se pudo obtener la ubicación."); }
@@ -73,7 +76,7 @@ export default function Tiendas() {
       {consulta.isLoading && <p className="text-suave">Cargando…</p>}
       {consulta.error && <p role="alert" className="text-error">No se pudieron cargar las tiendas.</p>}
       {!consulta.isLoading && lista.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">Todavía no hay tiendas que coincidan.</p>}
-      <div className="grid gap-4 md:grid-cols-2">{lista.map((t) => <TarjetaTienda key={t.id} t={t} />)}</div>
+      <div className="grid gap-4 md:grid-cols-2">{lista.map((t) => <TarjetaTienda key={t.id} t={t} promocionada={promociones.data?.has(t.id)} />)}</div>
     </main>
   );
 }

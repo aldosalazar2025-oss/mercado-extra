@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
+import MonetizacionVendedor from "@/features/monetizacion/MonetizacionVendedor";
+import { AdminPlanes } from "@/features/monetizacion/Planes";
+import SolicitudesComerciales from "@/features/monetizacion/SolicitudesComerciales";
 import RegistrosAdmin from "@/features/admin/RegistrosAdmin";
 import ResumenAdmin from "@/features/admin/ResumenAdmin";
 import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
@@ -25,8 +28,11 @@ const resumenDemo = [
 ];
 
 function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
+  if (panel === "admin" && seccion === "Planes comerciales") return <AdminPlanes />;
+  if (panel === "admin" && seccion === "Promociones") return <SolicitudesComerciales tipo="promocion" admin />;
+  if (panel === "vendedor" && seccion === "Promociones y planes") return <MonetizacionVendedor />;
   if (panel === "admin" && seccion === "Resumen general") return <ResumenAdmin />;
-  if (panel === "admin" && ["Usuarios", "Solicitudes", "Ofertas", "Operaciones", "Promociones", "Planes comerciales", "Reportes", "Auditoría"].includes(seccion)) {
+  if (panel === "admin" && ["Usuarios", "Solicitudes", "Ofertas", "Operaciones", "Reportes", "Auditoría"].includes(seccion)) {
     return <RegistrosAdmin key={seccion} seccion={seccion} />;
   }
   if (panel === "admin" && seccion === "Verificación de identidad") return <AdminVerificaciones />;

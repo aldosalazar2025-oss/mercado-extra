@@ -1164,6 +1164,59 @@ select t.ok((select status = 'visible' from public.ratings where order_id = t.u(
 select t.ok(t.n($q$select 1 from public.audit_logs where action in ('cambiar_estado_usuario', 'resolver_denuncia_calificacion')$q$) = 4,
   'cambios de cuenta y decisiones de reputación quedan auditados');
 
+-- Etapa 16. Planes, cupos y publicación de promociones.
+select t.como(t.u(3));
+select t.ok(t.falla($q$select public.admin_guardar_plan(null, 'No autorizado', 10, 2, true)$q$), 'un vendedor no crea planes');
+select t.como(t.u(7));
+select public.admin_guardar_plan(null, 'Plan de prueba', 19.90, 2, true);
+select t.anon();
+select t.ok(t.n($q$select 1 from public.subscription_plans where name = 'Plan de prueba'$q$) = 1, 'un visitante puede consultar planes disponibles');
+select t.como(t.u(5));
+select t.ok(t.falla(format('select public.solicitar_promocion(%L, null, 7)', t.u(101))), 'un empleado no contrata promociones de la tienda');
+select t.como(t.u(3));
+select t.ok(t.falla(format('select public.solicitar_promocion(%L, %L, 7)', t.u(101), t.u(202))), 'no se promociona un producto de otra tienda');
+select public.solicitar_promocion(t.u(101), null, 7);
+select t.ok(t.falla(format('select public.solicitar_promocion(%L, %L, 7)', t.u(101), t.u(201))), 'sin plan se permite una promoción simultánea');
+select public.solicitar_plan_comercial(t.u(101), (select id from public.subscription_plans where name = 'Plan de prueba'));
+select t.ok(t.falla(format('select public.solicitar_plan_comercial(%L, %L)', t.u(101),
+  (select id from public.subscription_plans where name = 'Plan de prueba'))), 'se bloquean solicitudes de plan duplicadas');
+select t.ok(t.falla(format('select public.decidir_plan_comercial(%L, %L, %L)', (select id from public.subscriptions where store_id = t.u(101)),
+  'activar', 'Activación no autorizada')), 'el vendedor no se activa un plan');
+select t.anon();
+select t.ok(t.n(format('select 1 from public.catalogo_promocionado(array[%L]::uuid[], array[]::uuid[])', t.u(101))) = 0,
+  'las promociones pendientes son invisibles al público');
+select t.como(t.u(7));
+select public.decidir_plan_comercial(id, 'activar', 'Acuerdo confirmado') from public.subscriptions where store_id = t.u(101);
+select t.ok((select status = 'activa' and precio_acordado = 19.90 and ends_at > now() and max_promociones_acordadas = 2
+  from public.subscriptions where store_id = t.u(101)), 'el plan conserva precio y cupo y se activa por un mes');
+select public.decidir_promocion(id, 'activar', 'Tienda aprobada') from public.promotions where store_id = t.u(101);
+select t.como(t.u(3));
+select public.solicitar_promocion(t.u(101), t.u(201), 14);
+select t.ok(t.n(format('select 1 from public.promotions where store_id = %L', t.u(101))) = 2, 'un plan vigente permite el cupo contratado');
+select t.como(t.u(7));
+select public.decidir_promocion(id, 'activar', 'Producto aprobado') from public.promotions where store_id = t.u(101) and product_id = t.u(201);
+select t.anon();
+select t.ok(t.n(format('select 1 from public.catalogo_promocionado(array[%L]::uuid[], array[%L]::uuid[])', t.u(101), t.u(201))) = 2,
+  'el catálogo recibe tienda y producto destacados');
+select t.ok(t.falla('select decision from public.promotions'), 'los motivos de revisión no son públicos');
+select t.como(t.u(7));
+select public.decidir_promocion(id, 'pausar', 'Campaña pausada para la prueba') from public.promotions where product_id = t.u(201);
+select t.anon();
+select t.ok(t.n(format('select 1 from public.catalogo_promocionado(array[]::uuid[], array[%L]::uuid[])', t.u(201))) = 0,
+  'una promoción pausada deja de aparecer en el catálogo');
+
+select t.como(t.u(3));
+select public.solicitar_promocion(t.u(101), t.u(201), 7);
+select t.como(t.u(7));
+select public.decidir_promocion(id, 'rechazar', 'La publicación no cumple los requisitos comerciales')
+  from public.promotions where product_id = t.u(201) and status = 'pendiente';
+select t.como(t.u(3));
+select t.ok(t.n(format('select 1 from public.promotions where product_id = %L and status = %L and decision = %L',
+  t.u(201), 'rechazada', 'La publicación no cumple los requisitos comerciales')) = 1, 'el propietario ve el estado rechazado y su motivo');
+select t.anon();
+select t.ok(t.n(format('select 1 from public.catalogo_promocionado(array[]::uuid[], array[%L]::uuid[])', t.u(201))) = 0,
+  'una promoción rechazada no se publica en el catálogo');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

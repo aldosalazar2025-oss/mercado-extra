@@ -87,20 +87,6 @@ const fichas: Record<string, Ficha> = {
       </div>
     </>,
   },
-  Promociones: {
-    tabla: "promotions",
-    columnas: "id,kind,status,starts_at,ends_at,created_at,stores(name)",
-    estados: ["pendiente", "activa", "pausada", "vencida", "rechazada"],
-    titulo: (f) => (f.stores as { name: string } | null)?.name ?? "Promoción",
-    detalle: (f) => <p className="capitalize">{etiqueta(f.kind)}{f.ends_at ? ` · Hasta ${fecha(texto(f, "ends_at"))}` : ""}</p>,
-  },
-  "Planes comerciales": {
-    tabla: "subscription_plans",
-    columnas: "id,name,description,price_month,active,created_at",
-    buscar: { etiqueta: "Nombre del plan", campo: () => "name" },
-    titulo: (f) => texto(f, "name"),
-    detalle: (f) => <p>{f.active ? "Activo" : "Inactivo"} · {soles(Number(f.price_month))} al mes{f.description ? ` · ${texto(f, "description")}` : ""}</p>,
-  },
   Reportes: {
     tabla: "rating_reports",
     columnas: "id,reason,status,created_at,ratings(score,comment,status,order_id)",

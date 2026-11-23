@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cargarReputacion, textoReputacion } from "@/features/reputacion/reputacion";
+import { usePromocionesPublicas } from "@/features/monetizacion/datos";
 import TarjetaProducto from "@/components/TarjetaProducto";
 import type { ProductoCatalogo } from "@/features/catalogo/tipos";
 import { supabase } from "@/lib/supabase";
@@ -45,6 +46,7 @@ export default function TiendaPublica() {
     queryFn: async () => (await cargarReputacion(id ? [id] : []))[0] ?? null,
   });
 
+  const promociones = usePromocionesPublicas("productos", consulta.data?.productos.map((p) => p.id) ?? []);
   if (consulta.isLoading) return <main className="mx-auto max-w-4xl px-4 py-10 text-suave">Cargando…</main>;
   if (!consulta.data) {
     return (
@@ -84,7 +86,7 @@ export default function TiendaPublica() {
       {t.description && <p className="whitespace-pre-line">{t.description}</p>}
       <h2 className="font-display text-2xl font-extrabold text-pino">Productos de la tienda</h2>
       {cards.length === 0 ? <p className="rounded-xl bg-white p-6 text-suave">Esta tienda aún no publicó productos.</p> : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{cards.map((p) => <TarjetaProducto key={p.id} p={p} />)}</div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{cards.map((p) => <TarjetaProducto key={p.id} p={p} promocionado={promociones.data?.has(p.id)} />)}</div>
       )}
     </main>
   );
