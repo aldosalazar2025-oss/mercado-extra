@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import CalificarPedido from "@/features/reputacion/CalificarPedido";
 import Boton from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import { comprimirImagen } from "@/lib/imagen";
@@ -258,7 +259,7 @@ function AccionesComprador({ p }: { p: Pedido }) {
   return (
     <section className="space-y-3 rounded-xl border border-borde bg-white p-4">
       <h3 className="font-display text-lg font-bold text-pino">¿Todo bien con tu compra?</h3>
-      <p className="text-sm text-suave">Si recibiste lo acordado, cierra la operación. La calificación y los reclamos llegan en las siguientes etapas.</p>
+      <p className="text-sm text-suave">Si recibiste lo acordado, cierra la operación. Puedes calificar antes o después de completar la operación.</p>
       {error && <p role="alert" className="text-sm font-semibold text-error">{error}</p>}
       <Boton variante="secundario" disabled={completar.isPending} onClick={() => { if (confirm("¿Confirmas que todo está bien y quieres completar la operación?")) completar.mutate(); }}>Completar la operación</Boton>
     </section>
@@ -307,6 +308,7 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
       {rol === "vendedor" && enEntrega && <ConfirmarEntrega p={p} />}
       {rol === "comprador" && <CodigoComprador p={p} />}
       {rol === "comprador" && <AccionesComprador p={p} />}
+      {(p.estado === "entregado" || p.estado === "completada") && <CalificarPedido key={p.order_id + p.mi_rol + uid} p={p} uid={uid} />}
       <Evidencias p={p} editable={rol === "vendedor" && (antesDeEnviar || (p.modo === "recojo" && enEntrega))} uid={uid} />
 
       <section className="space-y-2 rounded-xl border border-borde bg-white p-4">

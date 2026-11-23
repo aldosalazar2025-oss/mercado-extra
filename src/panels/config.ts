@@ -31,7 +31,7 @@ export const permisoSeccion: Record<string, string | null> = {
   "Chat": "chat",
   "Evidencias de entrega": "gestionar_pedidos",
   "Empleados y permisos": "gestionar_empleados",
-  "Calificaciones": "ver_estadisticas",
+  "Calificaciones": null,
   "Estadísticas": "ver_estadisticas",
   "Promociones y planes": "gestionar_planes",
 };

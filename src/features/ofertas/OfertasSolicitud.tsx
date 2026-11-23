@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cargarReputacion, textoReputacion, type Reputacion } from "@/features/reputacion/reputacion";
 import Boton from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import { etiquetaSolicitud, type EstadoSolicitud } from "@/features/solicitudes/tipos";
@@ -10,10 +11,9 @@ import { COLUMNAS_VERSION, etiquetaOferta, ordenarVersiones, propuestaPendiente,
 
 type Oferta = {
   id: string; status: EstadoOferta; store_id: string; current_version_id: string | null;
-  stores: { id: string; name: string; address: string | null; offers_delivery: boolean; offers_pickup: boolean; owner_id: string } | null;
+  stores: { id: string; name: string; address: string | null; offers_delivery: boolean; offers_pickup: boolean } | null;
   offer_history: Version[];
 };
-type Reputacion = { calificacion_promedio: number | null; total_calificaciones: number; ventas_completadas: number };
 type Datos = {
   solicitud: { id: string; title: string; max_budget: number; budget_negotiable: boolean; status: EstadoSolicitud } | null;
   ofertas: Oferta[]; reputaciones: Map<string, Reputacion>; urls: Map<string, string>;
@@ -26,7 +26,7 @@ function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
   const vigente = versionVigente(versiones, o.status, o.current_version_id);
   const tienda = o.stores;
   const [modo, setModo] = useState<"domicilio" | "recojo">(tienda?.offers_delivery ? "domicilio" : "recojo");
-  const rep = tienda ? datos.reputaciones.get(tienda.owner_id) : undefined;
+  const rep = tienda ? datos.reputaciones.get(tienda.id) : undefined;
   if (!vigente || !tienda || !datos.solicitud) return null;
   const dif = datos.solicitud.max_budget - vigente.price;
   const e = etiquetaOferta[o.status];
@@ -37,7 +37,7 @@ function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
         <div className="space-y-1">
           <p className="font-display text-lg font-bold"><Link to={`/tiendas/${tienda.id}`} className="hover:underline">{tienda.name}</Link></p>
           <p className="text-sm text-suave">
-            {rep && rep.total_calificaciones > 0 ? `${Number(rep.calificacion_promedio).toFixed(1)} de 5 · ${rep.total_calificaciones} calificaciones · ${rep.ventas_completadas} ventas` : "Sin calificaciones todavía"}
+            {rep ? textoReputacion(rep) : "Reputación no disponible."}
           </p>
           <p className="text-sm text-suave">{[tienda.address, [tienda.offers_delivery ? "Entrega a domicilio" : null, tienda.offers_pickup ? "Recojo en tienda" : null].filter(Boolean).join(" y ")].filter(Boolean).join(" · ")}</p>
         </div>
@@ -112,16 +112,14 @@ export default function OfertasSolicitud() {
       if (s.error || !s.data) return vacio;
       const o = await supabase
         .from("offers")
-        .select(`id,status,store_id,current_version_id,stores(id,name,address,offers_delivery,offers_pickup,owner_id),offer_history!offer_history_offer_id_fkey(${COLUMNAS_VERSION})`)
+        .select(`id,status,store_id,current_version_id,stores(id,name,address,offers_delivery,offers_pickup),offer_history!offer_history_offer_id_fkey(${COLUMNAS_VERSION})`)
         .eq("request_id", id).neq("status", "retirada");
       if (o.error) throw o.error;
       const ofertas = (o.data ?? []) as unknown as Oferta[];
       const reputaciones = new Map<string, Reputacion>();
-      const duenos = [...new Set(ofertas.map((x) => x.stores?.owner_id).filter((x): x is string => Boolean(x)))];
-      if (duenos.length > 0) {
-        const r = await supabase.from("perfiles_publicos").select("id,calificacion_promedio,total_calificaciones,ventas_completadas").in("id", duenos);
-        (r.data ?? []).forEach((x) => reputaciones.set(x.id as string, { calificacion_promedio: x.calificacion_promedio as number | null, total_calificaciones: Number(x.total_calificaciones), ventas_completadas: Number(x.ventas_completadas) }));
-      }
+      const ids = [...new Set(ofertas.map((oferta) => oferta.store_id))];
+      const resumenes = await cargarReputacion(ids).catch(() => []);
+      resumenes.forEach((resumen) => reputaciones.set(resumen.id, resumen));
       const urls = new Map<string, string>();
       const rutas = ofertas.flatMap((x) => x.offer_history.flatMap((v) => v.photo_paths));
       if (rutas.length > 0) {

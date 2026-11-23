@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { cargarReputacion, textoReputacion } from "@/features/reputacion/reputacion";
 import TarjetaProducto from "@/components/TarjetaProducto";
 import type { ProductoCatalogo } from "@/features/catalogo/tipos";
 import { supabase } from "@/lib/supabase";
@@ -38,6 +39,12 @@ export default function TiendaPublica() {
     },
   });
 
+  const reputacion = useQuery({
+    queryKey: ["reputacion-tienda", id],
+    enabled: Boolean(id && consulta.data),
+    queryFn: async () => (await cargarReputacion(id ? [id] : []))[0] ?? null,
+  });
+
   if (consulta.isLoading) return <main className="mx-auto max-w-4xl px-4 py-10 text-suave">Cargando…</main>;
   if (!consulta.data) {
     return (
@@ -64,6 +71,8 @@ export default function TiendaPublica() {
         <div className="min-w-0 flex-1 space-y-1">
           <h1 className="font-display text-3xl font-extrabold">{t.name}</h1>
           <p className="text-sm text-suave">{t.store_categories.map((c) => c.categories?.name).filter(Boolean).join(", ")}</p>
+          {reputacion.data && <p className="text-sm font-semibold">{textoReputacion(reputacion.data)}</p>}
+          {reputacion.isError && <p className="text-sm text-suave">Reputación no disponible.</p>}
           {t.address && <p>{t.address}</p>}
           {t.phone && <p className="text-sm">Teléfono: {t.phone}</p>}
           <p className="flex flex-wrap gap-2 pt-1 text-sm">

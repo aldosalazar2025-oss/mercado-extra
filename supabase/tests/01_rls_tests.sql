@@ -314,20 +314,20 @@ select t.ok(t.n(format('select 1 from public.delivery_evidence where order_id = 
 
 -- 9. Calificaciones
 select t.como(t.u(1));
-select t.ok(t.falla(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score) values (%L, %L, %L, %L, 5)', t.u(502), t.u(1), 'comprador', t.u(3))), 'no se califica un pedido no entregado');
-select t.ok(t.falla(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score) values (%L, %L, %L, %L, 5)', t.u(501), t.u(1), 'comprador', t.u(4))), 'no se califica a quien no participó');
-select t.ok(t.falla(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score) values (%L, %L, %L, %L, 6)', t.u(501), t.u(1), 'comprador', t.u(3))), 'puntaje fuera de 1 a 5 rechazado');
-select t.ok(t.afecta(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score, comment) values (%L, %L, %L, %L, 4, %L)', t.u(501), t.u(1), 'comprador', t.u(3), 'Buena atención')) = 1, 'comprador califica al vendedor tras la entrega');
-select t.ok(t.falla(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score) values (%L, %L, %L, %L, 5)', t.u(501), t.u(1), 'comprador', t.u(3))), 'no se califica dos veces el mismo pedido');
+select t.ok(t.falla(format('select public.calificar_pedido(%L, %L, 5::smallint, null)', t.u(502), 'comprador')), 'no se califica un pedido no entregado');
+select t.ok(t.falla(format('select public.calificar_pedido(%L, %L, 6::smallint, null)', t.u(501), 'comprador')), 'puntaje fuera de 1 a 5 rechazado');
+select public.calificar_pedido(t.u(501), 'comprador', 4::smallint, 'Buena atención');
+select t.ok(t.n(format('select 1 from public.ratings where rated_id = %L and score = 4', t.u(3))) = 1, 'comprador califica al vendedor tras la entrega');
+select t.ok(t.falla(format('select public.calificar_pedido(%L, %L, 5::smallint, null)', t.u(501), 'comprador')), 'no se califica dos veces el mismo pedido');
 select t.ok(t.afecta(format('update public.ratings set score = 5 where order_id = %L', t.u(501))) = 0, 'una calificación no se edita');
 select t.como(t.u(3));
-select t.ok(t.afecta(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score) values (%L, %L, %L, %L, 5)', t.u(501), t.u(3), 'vendedor', t.u(1))) = 1, 'vendedor califica al comprador');
+select public.calificar_pedido(t.u(501), 'vendedor', 5::smallint, null);
+select t.ok(t.n(format('select 1 from public.ratings where rated_id = %L and score = 5', t.u(1))) = 1, 'vendedor califica al comprador');
 select t.ok(t.afecta(format('insert into public.rating_reports (rating_id, reporter_id, reason) select id, %L, %L from public.ratings where rated_id = %L', t.u(3), 'Calificación injusta sin motivo', t.u(3))) = 1, 'calificado puede denunciar una calificación abusiva');
 select t.como(t.u(2));
-select t.ok(t.falla(format('insert into public.ratings (order_id, rater_id, rater_role, rated_id, score) values (%L, %L, %L, %L, 1)', t.u(501), t.u(2), 'comprador', t.u(3))), 'un tercero no puede calificar');
-select t.como(t.u(4));
-select t.ok(t.n('select 1 from public.ratings') = 2, 'las calificaciones visibles son públicas para usuarios con sesión');
-select t.ok(t.falla(format('insert into public.rating_reports (rating_id, reporter_id, reason) select id, %L, %L from public.ratings limit 1', t.u(4), 'Denuncia de un tercero')), 'un tercero no denuncia calificaciones ajenas');
+select t.ok(t.falla(format('select public.calificar_pedido(%L, %L, 1::smallint, null)', t.u(501), 'comprador')), 'un tercero no puede calificar');
+select t.ok(t.n('select 1 from public.ratings') = 0, 'un tercero no ve las calificaciones ajenas');
+select t.ok((select total_calificaciones = 1 and calificacion_promedio = 4.00 from public.reputacion_tiendas(array[t.u(101)])), 'la reputación de tienda solo agrega calificaciones de compradores');
 select t.root();
 select t.ok((select total_calificaciones = 1 and calificacion_promedio = 4.00 from public.perfiles_publicos where id = t.u(3)), 'reputación pública calculada correctamente');
 
