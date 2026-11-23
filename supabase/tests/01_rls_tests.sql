@@ -1139,6 +1139,31 @@ select public.revisar_apelacion((select id from public.sanctions where user_id =
 select t.como(t.u(1));
 select t.ok(public.cuenta_activa(), 'aceptar la apelación revierte la sanción');
 
+-- Etapa 15. Panel administrativo, moderación de calificaciones y auditoría.
+select t.como(t.u(1));
+select t.ok(t.falla('select public.admin_resumen()'), 'comprador no puede leer el resumen administrativo');
+select t.ok(t.falla(format('select public.admin_estado_usuario(%L, %L, %L)', t.u(2), 'bloqueado', 'Cambio no autorizado')), 'comprador no cambia el estado de otras cuentas');
+select t.ok(t.falla(format('select public.admin_resolver_denuncia_calificacion(%L, true, %L)', t.u(701), 'Resolución no autorizada')), 'comprador no puede resolver denuncias de calificaciones');
+insert into public.rating_reports (rating_id, reporter_id, reason)
+  select id, t.u(1), 'Denuncia de prueba que será rechazada'
+  from public.ratings where order_id = t.u(501) and rated_id = t.u(1);
+select t.como(t.u(7));
+select t.ok((public.admin_resumen()->>'calificaciones')::integer = 2, 'el resumen cuenta denuncias pendientes');
+select t.ok(t.n(format('select 1 from public.requests where id = %L', t.u(306))) = 1, 'el administrador puede consultar una solicitud retirada');
+select t.ok(t.falla(format('select public.admin_estado_usuario(%L, %L, %L)', t.u(7), 'bloqueado', 'Cuenta administrativa protegida')), 'el cambio de estado protege cuentas administrativas');
+select public.admin_estado_usuario(t.u(2), 'suspendido', 'Suspensión de prueba administrativa');
+select t.ok((select status = 'suspendido' from public.profiles where id = t.u(2)), 'administración actualiza un estado de cuenta');
+select public.admin_estado_usuario(t.u(2), 'activo', 'Reactivación de prueba administrativa');
+select public.admin_resolver_denuncia_calificacion(id, true, 'Se confirmó el abuso en el comentario')
+  from public.rating_reports where reporter_id = t.u(3);
+select public.admin_resolver_denuncia_calificacion(id, false, 'Se comprobó que la calificación corresponde al pedido')
+  from public.rating_reports where reporter_id = t.u(1);
+select t.ok((select status = 'aceptada' from public.rating_reports where reporter_id = t.u(3)), 'denuncia aceptada queda registrada');
+select t.ok((select total_calificaciones = 0 from public.reputacion_tiendas(array[t.u(101)])), 'calificación ocultada deja de contar para la tienda');
+select t.ok((select status = 'visible' from public.ratings where order_id = t.u(501) and rated_id = t.u(1)), 'rechazar una denuncia conserva la calificación visible');
+select t.ok(t.n($q$select 1 from public.audit_logs where action in ('cambiar_estado_usuario', 'resolver_denuncia_calificacion')$q$) = 4,
+  'cambios de cuenta y decisiones de reputación quedan auditados');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

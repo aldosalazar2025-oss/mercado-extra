@@ -7,7 +7,7 @@ export function useCasosMutation<T>(fn: (arg: T) => Promise<void>) {
   return useMutation({
     mutationFn: fn,
     onSuccess: async () => {
-      await Promise.all(["casos", "pedidos", "mis-solicitudes", "ofertas-solicitud"].map((key) =>
+      await Promise.all(["casos", "pedidos", "mis-solicitudes", "ofertas-solicitud", "admin"].map((key) =>
         cliente.invalidateQueries({ queryKey: [key] }),
       ));
     },

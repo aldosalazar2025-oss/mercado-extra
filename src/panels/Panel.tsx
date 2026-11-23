@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
+import RegistrosAdmin from "@/features/admin/RegistrosAdmin";
+import ResumenAdmin from "@/features/admin/ResumenAdmin";
 import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
 import AdminCategorias from "@/features/catalogo/AdminCategorias";
 import AdminProductos from "@/features/catalogo/AdminProductos";
@@ -23,6 +25,10 @@ const resumenDemo = [
 ];
 
 function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
+  if (panel === "admin" && seccion === "Resumen general") return <ResumenAdmin />;
+  if (panel === "admin" && ["Usuarios", "Solicitudes", "Ofertas", "Operaciones", "Promociones", "Planes comerciales", "Reportes", "Auditoría"].includes(seccion)) {
+    return <RegistrosAdmin key={seccion} seccion={seccion} />;
+  }
   if (panel === "admin" && seccion === "Verificación de identidad") return <AdminVerificaciones />;
   if (seccion === "Reclamos") return <ListaCasos rol={panel} clase="reclamo" />;
   if (seccion === "Cancelaciones") return <ListaCasos rol={panel} clase="cancelacion" />;
@@ -63,7 +69,7 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
   const pedida = seccionFija ?? todas.find((s) => slug(s) === seccion) ?? todas[0];
   const sinAcceso = panel === "vendedor" && !misPermisos.isLoading && !visibles(pedida);
   const actual = pedida;
-  const esResumen = !contenido && actual === todas[0];
+  const esResumen = panel !== "admin" && !contenido && actual === todas[0];
   const real = sinAcceso ? (
     <p className="rounded-xl bg-white p-6 text-suave">Tu rol en tus tiendas no incluye esta sección. Si la necesitas, pídele al propietario que te dé el permiso.</p>
   ) : (

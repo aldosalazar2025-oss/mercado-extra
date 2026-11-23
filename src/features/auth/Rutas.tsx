@@ -17,7 +17,7 @@ export function RequiereSesion() {
 export function RequiereAdmin() {
   const { cargando, perfil } = useAuth();
   if (cargando) return <Mensaje texto="Cargando…" />;
-  if (!perfil?.is_admin) {
+  if (!perfil?.is_admin || perfil.status !== "activo") {
     return (
       <main className="mx-auto max-w-xl px-4 py-14 text-center">
         <h1 className="font-display text-2xl font-extrabold text-pino">Acceso restringido</h1>
