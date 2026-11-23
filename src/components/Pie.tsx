@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import Logo from "./Logo";
 
 export default function Pie() {
@@ -16,7 +15,6 @@ export default function Pie() {
         <div className="space-y-2">
           <h2 className="font-display font-bold">Para tiendas</h2>
           <p className="text-white/80">Sin comisión por ventas. Los pagos se acuerdan directamente con el comprador.</p>
-          <Link to="/estado" className="inline-block text-sm text-maiz underline">Estado del sistema</Link>
         </div>
       </div>
     </footer>

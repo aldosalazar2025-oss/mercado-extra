@@ -29,7 +29,7 @@ export default function Ingresar() {
       <Boton variante="secundario" className="w-full" disabled={!configurado || enviando} onClick={entrar}>
         {enviando ? "Abriendo Google…" : "Continuar con Google"}
       </Boton>
-      {!configurado && <p className="text-sm text-error">Falta configurar Supabase (ver «Estado del sistema» al pie de la página).</p>}
+      {!configurado && <p className="text-sm text-error">Falta configurar la conexión con Supabase.</p>}
       {error && <p role="alert" className="text-sm font-semibold text-error">{error}</p>}
       <p className="text-sm text-suave">Ingresar y comprar es gratis. Al continuar aceptas el uso de tus datos según la política de privacidad.</p>
     </main>
