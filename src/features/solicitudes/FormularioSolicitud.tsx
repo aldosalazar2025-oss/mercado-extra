@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
 import Campo, { estiloInput } from "@/components/Campo";
@@ -10,10 +10,40 @@ import type { Solicitud } from "./tipos";
 
 type Props = { solicitud?: Solicitud; onGuardado: (id: string) => void };
 
+function EliminarFoto({ etiqueta, eliminar, deshabilitada }: { etiqueta: string; eliminar: () => void; deshabilitada: boolean }) {
+  return (
+    <button type="button" disabled={deshabilitada} aria-label={etiqueta} onClick={eliminar}
+      className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error/30 bg-white px-2 text-xs font-bold text-error hover:bg-error/10 focus-visible:outline-2 focus-visible:outline-error disabled:opacity-50">
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor"
+        strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v6m4-6v6" />
+      </svg>
+      Eliminar
+    </button>
+  );
+}
+
+function VistaPreviaFoto({ archivo, quitar, deshabilitada }: { archivo: File; quitar: () => void; deshabilitada: boolean }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const vistaPrevia = URL.createObjectURL(archivo);
+    setUrl(vistaPrevia);
+    return () => URL.revokeObjectURL(vistaPrevia);
+  }, [archivo]);
+
+  return (
+    <li className="w-24 space-y-1 text-center">
+      {url && <img src={url} alt={archivo.name} className="h-24 w-24 rounded-lg border border-borde object-cover" />}
+      <EliminarFoto etiqueta={`Eliminar ${archivo.name}`} eliminar={quitar} deshabilitada={deshabilitada} />
+    </li>
+  );
+}
+
 export default function FormularioSolicitud({ solicitud, onGuardado }: Props) {
   const { session } = useAuth();
   const cliente = useQueryClient();
   const categorias = useCategorias();
+  const selectorFotos = useRef<HTMLInputElement>(null);
   const [titulo, setTitulo] = useState(solicitud?.title ?? "");
   const [descripcion, setDescripcion] = useState(solicitud?.description ?? "");
   const [categoria, setCategoria] = useState(solicitud?.category_id ?? "");
@@ -22,8 +52,9 @@ export default function FormularioSolicitud({ solicitud, onGuardado }: Props) {
   const [modelo, setModelo] = useState(solicitud?.attributes.modelo ?? "");
   const [presupuesto, setPresupuesto] = useState(solicitud ? String(solicitud.max_budget) : "");
   const [negociable, setNegociable] = useState(solicitud?.budget_negotiable ?? false);
-  const [nuevas, setNuevas] = useState<File[]>([]);
+  const [nuevas, setNuevas] = useState<{ id: string; archivo: File }[]>([]);
   const [fotos, setFotos] = useState(solicitud?.request_images ?? []);
+  const cuposFotos = Math.max(0, 5 - fotos.length - nuevas.length);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -42,9 +73,9 @@ export default function FormularioSolicitud({ solicitud, onGuardado }: Props) {
   });
 
   async function quitarFoto(f: { id: string; path: string }) {
-    if (!supabase || !confirm("¿Quitar esta foto?")) return;
+    if (!supabase || !confirm("¿Eliminar esta foto?")) return;
     const r = await supabase.from("request_images").delete().eq("id", f.id).select("id");
-    if (r.error || !r.data?.length) return setError("No se pudo quitar la foto.");
+    if (r.error || !r.data?.length) return setError("No se pudo eliminar la foto.");
     await supabase.storage.from("request-images").remove([f.path]);
     setFotos((x) => x.filter((y) => y.id !== f.id));
   }
@@ -81,7 +112,7 @@ export default function FormularioSolicitud({ solicitud, onGuardado }: Props) {
         if (r.error) throw new Error(r.error.message.includes("máximo 10") ? "Tienes demasiadas solicitudes abiertas (máximo 10). Cierra alguna antes de publicar otra." : "No se pudo publicar la solicitud.");
       }
       let fallidas = 0;
-      for (const [i, archivo] of nuevas.entries()) {
+      for (const [i, { archivo }] of nuevas.entries()) {
         try {
           const blob = await comprimirImagen(archivo, 1400);
           const ruta = `${id}/ref-${Date.now()}-${i}.jpg`;
@@ -126,18 +157,37 @@ export default function FormularioSolicitud({ solicitud, onGuardado }: Props) {
 
       <fieldset className="space-y-2">
         <legend className="font-bold">Fotos de referencia (hasta 5, opcional)</legend>
-        {fotos.length > 0 && (
-          <ul className="flex flex-wrap gap-3">
-            {fotos.map((f) => (
-              <li key={f.id} className="space-y-1 text-center">
-                {urls.data?.get(f.path) ? <img src={urls.data.get(f.path)} alt="" className="h-24 w-24 rounded-lg border border-borde object-cover" /> : <div className="h-24 w-24 rounded-lg bg-hoja" />}
-                <button type="button" className="text-sm font-bold text-error underline" onClick={() => void quitarFoto(f)}>Quitar</button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(e) => setNuevas(Array.from(e.target.files ?? []))} className={estiloInput} aria-label="Agregar fotos de referencia" />
-        {nuevas.length > 0 && <p className="text-sm text-suave">{nuevas.length} foto(s) por subir al guardar.</p>}
+        <input ref={selectorFotos} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
+          onChange={(e) => {
+            const seleccionadas = Array.from(e.target.files ?? []);
+            e.target.value = "";
+            if (!seleccionadas.length) return;
+            const agregadas = seleccionadas.slice(0, cuposFotos).map((archivo) => ({ id: crypto.randomUUID(), archivo }));
+            setNuevas((previas) => [...previas, ...agregadas]);
+            setErrores((previos) => ({
+              ...previos,
+              fotos: seleccionadas.length > cuposFotos ? "Solo se añadieron las fotos que caben en el límite de 5." : "",
+            }));
+          }} />
+        <ul aria-label="Fotos de referencia" className="flex flex-wrap items-start gap-3">
+          {fotos.map((f) => (
+            <li key={f.id} className="w-24 space-y-1 text-center">
+              {urls.data?.get(f.path) ? <img src={urls.data.get(f.path)} alt="Foto de referencia guardada" className="h-24 w-24 rounded-lg border border-borde object-cover" /> : <div className="h-24 w-24 rounded-lg bg-hoja" />}
+              <EliminarFoto etiqueta="Eliminar foto de referencia guardada" eliminar={() => void quitarFoto(f)} deshabilitada={enviando} />
+            </li>
+          ))}
+          {nuevas.map(({ id, archivo }) => (
+            <VistaPreviaFoto key={id} archivo={archivo} deshabilitada={enviando} quitar={() => {
+              setNuevas((previas) => previas.filter((foto) => foto.id !== id));
+              setErrores((previos) => ({ ...previos, fotos: "" }));
+            }} />
+          ))}
+          <li>
+            <Boton type="button" variante="contorno" className="h-24 w-24 border-dashed !px-2 text-sm"
+              disabled={cuposFotos === 0 || enviando} onClick={() => selectorFotos.current?.click()}>+ Añadir</Boton>
+          </li>
+        </ul>
+        {nuevas.length > 0 && <p aria-live="polite" className="text-sm text-suave">{nuevas.length} foto(s) por subir al guardar.</p>}
         {errores.fotos && <p className="text-sm font-semibold text-error">{errores.fotos}</p>}
       </fieldset>
 
