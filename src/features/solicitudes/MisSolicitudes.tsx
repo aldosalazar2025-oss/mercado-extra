@@ -39,7 +39,7 @@ export default function MisSolicitudes() {
       return p.estado;
     },
     onSuccess: (estado) => {
-      setMensaje(estado === "abierta" ? "Solicitud renovada: tienes 24 horas más." : estado === "cancelada" ? "Solicitud cancelada." : "Solicitud eliminada.");
+      setMensaje(estado === "abierta" ? "Solicitud renovada: tienes 24 horas más." : "Solicitud eliminada.");
       void cliente.invalidateQueries({ queryKey: ["mis-solicitudes"] });
     },
     onError: (e) => setMensaje(e instanceof Error ? e.message : "Error"),
@@ -86,9 +86,6 @@ export default function MisSolicitudes() {
                 )}
                 {s.status === "vencida" && <Boton variante="secundario" disabled={ocupado} onClick={() => pedir(s.id, "abierta")}>Renovar 24 horas</Boton>}
                 {(s.status === "abierta" || s.status === "vencida") && <Link to={`/comprador/mis-solicitudes/${s.id}/editar`} className={clasesBoton("contorno")}>Modificar</Link>}
-                {(s.status === "abierta" || s.status === "con_ofertas" || s.status === "vencida") && (
-                  <Boton variante="contorno" disabled={ocupado} onClick={() => pedir(s.id, "cancelada", "¿Cancelar esta solicitud? Las tiendas dejarán de verla.")}>Cancelar</Boton>
-                )}
                 {s.status !== "atendida" && s.status !== "con_ofertas" && (
                   <Boton variante="contorno" disabled={ocupado} onClick={() => pedir(s.id, "eliminada", `¿Eliminar «${s.title}»?`)}>Eliminar</Boton>
                 )}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import CasosPedido from "@/features/reclamos/CasosPedido";
 import CalificarPedido from "@/features/reputacion/CalificarPedido";
 import Boton from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
@@ -309,6 +310,7 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
       {rol === "comprador" && <CodigoComprador p={p} />}
       {rol === "comprador" && <AccionesComprador p={p} />}
       {(p.estado === "entregado" || p.estado === "completada") && <CalificarPedido key={p.order_id + p.mi_rol + uid} p={p} uid={uid} />}
+      <CasosPedido key={p.order_id + p.mi_rol + uid} pedido={p} uid={uid} />
       <Evidencias p={p} editable={rol === "vendedor" && (antesDeEnviar || (p.modo === "recojo" && enEntrega))} uid={uid} />
 
       <section className="space-y-2 rounded-xl border border-borde bg-white p-4">

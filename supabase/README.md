@@ -19,11 +19,12 @@ Todas las migraciones están en `migrations/` y se aplican **en orden** (el pref
 | `20261112001400_chat.sql` | Chat: lectura, avisos agrupados, límites y tiempo real (Etapa 11) |
 | `20261112001500_pedidos.sql` | Pedidos: pasos, evidencias fotográficas y código de entrega (Etapa 12) |
 | `20261112001600_reputacion.sql` | Calificaciones mutuas, acceso a comentarios y reputación por tienda (Etapa 13) |
+| `20261112001700_reclamos_cancelaciones.sql` | Reclamos, cancelaciones, revisión y sanciones (Etapa 14) |
 
 ## Aplicarlas en tu proyecto Supabase de DESARROLLO (gratis, sin instalar nada)
 1. Entra a tu proyecto **mercado-extra-dev** > **SQL Editor** > **New query**.
 2. Abre el primer archivo en VS Code, copia TODO su contenido, pégalo y pulsa **Run**. Debe decir "Success".
-3. Repite con cada archivo pendiente, **uno por uno y en el orden de la tabla**. Si ya aplicaste hasta la Etapa 12, empieza por `20261112001600_reputacion.sql`. Si uno falla, no sigas: copia el error y envíamelo.
+3. Repite con cada archivo pendiente, **uno por uno y en el orden de la tabla**. Para instalar o actualizar la Etapa 14 desde el SQL Editor, ejecuta el archivo completo `20261112001700_reclamos_cancelaciones.sql`. Puedes volver a ejecutarlo si ya aplicaste una versión anterior de esta etapa. Si uno falla, no sigas: copia el error y envíamelo.
 4. Ejecuta `tests/02_verificacion_supabase.sql` y compara:
    - consulta 1: **0 filas**
    - consulta 2: **85** políticas en `public`

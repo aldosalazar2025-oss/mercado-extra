@@ -204,7 +204,9 @@ select t.ok(t.afecta(format('insert into public.requests (id, buyer_id, title, m
 select t.ok(t.falla(format('insert into public.requests (buyer_id, title, max_budget) values (%L, %L, -5)', t.u(1), 'Presupuesto inválido')), 'presupuesto negativo rechazado');
 select t.ok(t.falla(format('insert into public.requests (buyer_id, title, max_budget) values (%L, %L, 50)', t.u(2), 'A nombre de otro')), 'no se puede publicar a nombre de otro');
 select t.ok(t.afecta(format('update public.requests set status = %L where id = %L', 'abierta', t.u(304))) = 1, 'comprador renueva una solicitud vencida');
-select t.ok(t.afecta(format('update public.requests set status = %L where id = %L', 'cancelada', t.u(306))) = 1, 'comprador cancela su solicitud');
+select t.ok(t.falla(format('select public.cancelar_operacion(%L, false, %L, %L)', t.u(306), 'cambio_opinion', 'Ya no necesito el producto')), 'no se cancela una solicitud antes de aceptar una oferta');
+select t.ok(t.falla(format('update public.requests set status = %L where id = %L', 'cancelada', t.u(306))), 'no se cancela una solicitud mediante actualización directa');
+select t.ok(t.afecta(format('update public.requests set status = %L where id = %L', 'eliminada', t.u(306))) = 1, 'el comprador puede retirar la publicación sin cancelar un pedido');
 select t.como(t.u(2));
 select t.ok(t.n(format('select 1 from public.requests where id = %L', t.u(301))) = 0, 'otro comprador no ve la solicitud');
 select t.ok(t.afecta(format('update public.requests set title = %L where id = %L', 'Hackeada', t.u(301))) = 0, 'otro comprador no edita la solicitud');
@@ -335,9 +337,10 @@ select t.ok((select total_calificaciones = 1 and calificacion_promedio = 4.00 fr
 select t.como(t.u(1));
 select t.ok(t.falla(format('insert into public.claims (order_id, buyer_id, store_id, type, description) values (%L, %L, %L, %L, %L)', t.u(502), t.u(1), t.u(101), 'pedido_no_entregado', 'Aún en preparación no corresponde reclamar')), 'no se reclama un pedido que no fue enviado');
 select t.ok(t.afecta(format('insert into public.claims (id, order_id, buyer_id, store_id, type, description) values (%L, %L, %L, %L, %L, %L)', t.u(701), t.u(501), t.u(1), t.u(101), 'producto_defectuoso', 'El saco llegó con una costura abierta')) = 1, 'comprador presenta un reclamo de su pedido');
+select t.ok(t.falla(format('insert into public.claim_responses (claim_id, author_id, body) values (%L, %L, %L)', t.u(701), t.u(1), 'Respuesta propia')), 'comprador no responde el reclamo que abrió');
 select t.ok(t.afecta(format('insert into public.claim_evidence (claim_id, author_id, kind, file_path) values (%L, %L, %L, %L)', t.u(701), t.u(1), 'foto', t.u(701)::text || '/costura.jpg')) = 1, 'comprador adjunta evidencia');
-select t.ok(t.afecta(format('update public.claims set status = %L where id = %L', 'resuelto', t.u(701))) = 0, 'comprador no resuelve su propio reclamo');
-select t.ok(t.afecta(format('insert into public.cancellations (request_id, cancelled_by, reason_code) values (%L, %L, %L)', t.u(301), t.u(1), 'cambio_opinion')) = 1, 'comprador registra una cancelación con motivo');
+select t.ok(t.falla(format('select public.revisar_reclamo(%L, %L, %L)', t.u(701), 'acuerdo_partes', 'Motivo de prueba')), 'comprador no resuelve su propio reclamo');
+select t.ok(t.n(format('select 1 from public.cancellations where request_id = %L', t.u(306))) = 0, 'una solicitud abierta no genera registro de cancelación');
 select t.ok(t.falla(format('insert into public.cancellations (request_id, cancelled_by, reason_code, review_status) values (%L, %L, %L, %L)', t.u(301), t.u(1), 'otro', 'injustificada')), 'nadie se califica a sí mismo la revisión');
 select t.como(t.u(3));
 select t.ok(t.n(format('select 1 from public.claims where id = %L', t.u(701))) = 1, 'vendedor ve el reclamo contra su tienda');
@@ -349,13 +352,9 @@ select t.como(t.u(2));
 select t.ok(t.n('select 1 from public.claims') = 0, 'otro comprador no ve reclamos ajenos');
 select t.como(t.u(7));
 select t.ok(t.n('select 1 from public.claims') = 1, 'administrador ve los reclamos');
-select t.ok(t.afecta(format('update public.claims set status = %L, resolution = %L, resolved_by = %L, resolved_at = now() where id = %L', 'resuelto', 'acuerdo_partes', t.u(7), t.u(701))) = 1, 'administrador resuelve el reclamo');
-select t.ok(t.afecta(format('insert into public.sanctions (user_id, type, reason, source_type, created_by) values (%L, %L, %L, %L, %L)', t.u(3), 'advertencia', 'Cancelación injustificada comprobada', 'cancelacion', t.u(7))) = 1, 'administrador aplica una advertencia');
-select t.como(t.u(3));
-select t.ok(t.n('select 1 from public.sanctions') = 1, 'el sancionado ve su sanción');
-select t.como(t.u(4));
-select t.ok(t.n('select 1 from public.sanctions') = 0, 'otros no ven sanciones ajenas');
-select t.ok(t.falla(format('insert into public.sanctions (user_id, type, reason) values (%L, %L, %L)', t.u(3), 'bloqueo', 'Sanción ilegítima')), 'un usuario no puede sancionar a otro');
+select t.ok(t.n(format('select 1 from public.contexto_pedido_reclamo(%L)', t.u(501))) = 1, 'administración consulta el pedido y la oferta del reclamo');
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.contexto_pedido_reclamo(%L)', t.u(501))) = 0, 'un tercero no puede consultar el contexto administrativo');
 select t.como(t.u(9));
 select t.ok(t.falla(format('insert into public.requests (buyer_id, title, max_budget) values (%L, %L, 100)', t.u(9), 'Cuenta suspendida')), 'una cuenta suspendida no publica solicitudes');
 
@@ -1095,6 +1094,50 @@ select t.como(t.u(2));
 select t.ok(t.n(format('select 1 from public.mis_pedidos() where order_id = %L', t.ord(t.u(350)))) = 0, 'otro comprador no ve pedidos ajenos');
 select t.como(t.u(6));
 select t.ok(t.n(format('select 1 from public.mis_pedidos() where order_id = %L', t.ord(t.u(350)))) = 0, 'un empleado sin permiso de pedidos no los ve');
+
+-- Etapa 14. Revisión de reclamos después de probar la carga de evidencias.
+select t.como(t.u(7));
+select t.ok(t.falla(format('select public.aplicar_sancion(%L, %L, %L, null, %L)', t.u(701), 'reclamo', 'advertencia', 'Caso sin resolución')), 'no se sanciona un reclamo sin resolver');
+select public.revisar_reclamo(t.u(701), null, null);
+select t.ok((select status = 'en_revision' from public.claims where id = t.u(701)), 'administración inicia revisión');
+select public.revisar_reclamo(t.u(701), 'sancion', 'Incumplimiento confirmado');
+select t.ok((select status = 'resuelto' from public.claims where id = t.u(701)), 'administrador resuelve el reclamo');
+select public.aplicar_sancion(t.u(701), 'reclamo', 'advertencia', null, 'Incumplimiento comprobado');
+select t.como(t.u(3));
+select t.ok(t.n('select 1 from public.sanctions') = 1, 'el sancionado ve su sanción');
+select t.como(t.u(4));
+select t.ok(t.n('select 1 from public.sanctions') = 0, 'otros no ven sanciones ajenas');
+select t.ok(t.falla(format('insert into public.sanctions (user_id, type, reason) values (%L, %L, %L)', t.u(3), 'bloqueo', 'Sanción ilegítima')), 'un usuario no puede sancionar a otro');
+
+-- Etapa 14. Cancelación, denuncia y apelación de una sanción.
+select t.como(t.u(2));
+select t.ok(t.falla(format('select public.cancelar_operacion(%L, true, %L, %L)', t.u(502), 'otro', 'Pedido de otra persona')), 'terceros no cancelan pedidos ajenos');
+select t.como(t.u(1));
+select public.cancelar_operacion(t.u(502), true, 'cambio_opinion', 'Ya no puedo hacer la compra');
+select t.ok((select status = 'cancelada' from public.orders where id = t.u(502)), 'el pedido en preparación se cancela');
+select t.ok(t.falla(format('select public.responder_cancelacion(%L, %L, true)',
+  (select id from public.cancellations where order_id = t.u(502)), 'Denuncia de la propia cancelación')), 'el autor no puede denunciar su cancelación');
+select t.como(t.u(3));
+select public.responder_cancelacion((select id from public.cancellations where order_id = t.u(502)), 'El producto ya estaba empacado', true);
+insert into storage.objects (bucket_id, name)
+  select 'claim-evidence', 'cancelaciones/' || id || '/' || t.u(3) || '/paquete.jpg'
+  from public.cancellations where order_id = t.u(502);
+select public.adjuntar_cancelacion(id, 'cancelaciones/' || id || '/' || t.u(3) || '/paquete.jpg')
+  from public.cancellations where order_id = t.u(502);
+select t.como(t.u(1));
+select public.responder_cancelacion((select id from public.cancellations where order_id = t.u(502)), 'Tuve una emergencia personal', false);
+select t.como(t.u(7));
+select t.ok((select cardinality(evidence_paths) = 1 from public.cancellations where order_id = t.u(502)),
+  'administrador ve las referencias a evidencias de la cancelación');
+select public.revisar_cancelacion((select id from public.cancellations where order_id = t.u(502)), false, 'No se justificó el incumplimiento');
+select public.aplicar_sancion((select id from public.cancellations where order_id = t.u(502)), 'cancelacion', 'suspension_temporal', 2, 'Cancelación injustificada');
+select t.como(t.u(1));
+select t.ok(not public.cuenta_activa(), 'la suspensión impide operar');
+select public.apelar_sancion((select id from public.sanctions where user_id = t.u(1)), 'Adjunto la explicación de lo ocurrido');
+select t.como(t.u(7));
+select public.revisar_apelacion((select id from public.sanctions where user_id = t.u(1)), true);
+select t.como(t.u(1));
+select t.ok(public.cuenta_activa(), 'aceptar la apelación revierte la sanción');
 
 -- 13. Estructura y catálogos
 select t.root();

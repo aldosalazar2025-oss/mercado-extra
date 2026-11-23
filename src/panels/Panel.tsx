@@ -4,6 +4,7 @@ import AdminVerificaciones from "@/features/identidad/AdminVerificaciones";
 import AdminCategorias from "@/features/catalogo/AdminCategorias";
 import AdminProductos from "@/features/catalogo/AdminProductos";
 import SolicitudesRecibidas from "@/features/solicitudes/SolicitudesRecibidas";
+import { ListaCasos } from "@/features/reclamos/ListaCasos";
 import MisCalificaciones from "@/features/reputacion/MisCalificaciones";
 import ListaPedidos from "@/features/pedidos/ListaPedidos";
 import ChatPanel from "@/features/chat/ChatPanel";
@@ -23,6 +24,9 @@ const resumenDemo = [
 
 function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
   if (panel === "admin" && seccion === "Verificación de identidad") return <AdminVerificaciones />;
+  if (seccion === "Reclamos") return <ListaCasos rol={panel} clase="reclamo" />;
+  if (seccion === "Cancelaciones") return <ListaCasos rol={panel} clase="cancelacion" />;
+  if (seccion === "Sanciones") return <ListaCasos rol={panel} clase="sancion" />;
   if (panel === "admin" && seccion === "Tiendas") return <AdminTiendas />;
   if (panel === "comprador" && seccion === "Mis solicitudes") return <MisSolicitudes />;
   if (panel === "admin" && seccion === "Categorías") return <AdminCategorias />;
