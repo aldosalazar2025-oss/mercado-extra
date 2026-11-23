@@ -22,6 +22,7 @@ Todas las migraciones están en `migrations/` y se aplican **en orden** (el pref
 | `20261112001700_reclamos_cancelaciones.sql` | Reclamos, cancelaciones, revisión y sanciones (Etapa 14) |
 | `20261112002000_panel_administrativo.sql` | Resumen, seguimiento de operaciones, cuentas y denuncias (Etapa 15) |
 | `20261112002100_monetizacion.sql` | Planes mensuales opcionales, promociones y activación administrativa (Etapa 16) |
+| `20261112002300_panel_vendedor.sql` | Resumen operativo y estadísticas por tienda (Etapa 17) |
 
 ## Aplicarlas en tu proyecto Supabase de DESARROLLO (gratis, sin instalar nada)
 1. Entra a tu proyecto **mercado-extra-dev** > **SQL Editor** > **New query**.

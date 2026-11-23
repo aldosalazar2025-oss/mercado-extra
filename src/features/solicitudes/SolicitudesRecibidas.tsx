@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import Boton, { clasesBoton } from "@/components/Boton";
 import { useMisTiendas, usePermisosPorTienda } from "@/features/tiendas/hooks";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
+import SelectorTiendaVendedor from "@/features/vendedor/SelectorTiendaVendedor";
 import { tiempoRestante } from "./tipos";
 
 type Fila = {
@@ -28,7 +29,10 @@ export default function SolicitudesRecibidas({ soloPendientes = false }: { soloP
   const tiendas = useMisTiendas();
   const permisos = usePermisosPorTienda();
   // Solo las tiendas de esta persona: un administrador también ve las de todos, pero aquí solo importan las suyas.
-  const ids = (tiendas.data ?? []).filter((t) => permisos.data?.get(t.id)?.has("ver_solicitudes")).map((t) => t.id);
+  const [parametros] = useSearchParams();
+  const tienda = parametros.get("tienda");
+  const disponibles = (tiendas.data ?? []).filter((t) => t.status === "aprobada" && permisos.data?.get(t.id)?.has("ver_solicitudes"));
+  const ids = disponibles.filter((t) => !tienda || t.id === tienda).map((t) => t.id);
   const [ahora, setAhora] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setAhora(Date.now()), 30000);
@@ -76,13 +80,16 @@ export default function SolicitudesRecibidas({ soloPendientes = false }: { soloP
     onError: (e) => setMensaje(e instanceof Error ? e.message : "Error"),
   });
 
+  if (tiendas.isError || permisos.isError) return <p role="alert" className="text-error">No se pudieron cargar las tiendas o sus permisos.</p>;
   if (tiendas.isLoading || permisos.isLoading) return <p className="text-suave">Cargando…</p>;
-  if (ids.length === 0) {
+  if (disponibles.length === 0) {
     return <p className="rounded-xl bg-white p-6 text-suave">Aquí verás las solicitudes de compradores para tus tiendas. Necesitas tener una tienda aprobada (o ser empleado con permiso de ver solicitudes). Registra la tuya en <Link to="/vendedor/mis-tiendas" className="font-bold text-mercado underline">Mis tiendas</Link>.</p>;
   }
 
   return (
     <div className="space-y-4">
+      <SelectorTiendaVendedor tiendas={disponibles} />
+      {ids.length === 0 && <p className="text-suave">Elige una tienda donde tengas permiso para ver solicitudes.</p>}
       <p className="text-suave">Solicitudes de compradores relacionadas con lo que vendes. Solo ves las que corresponden a tu categoría y a tus productos.</p>
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}
       {lista.isLoading && <p className="text-suave">Cargando…</p>}

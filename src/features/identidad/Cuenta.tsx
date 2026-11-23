@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import Boton, { clasesBoton } from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
+import EditarTelefono from "@/features/comprador/EditarTelefono";
 import Invitaciones from "@/features/tiendas/Invitaciones";
 
 const textos = {
@@ -9,19 +10,21 @@ const textos = {
   rechazado: { titulo: "Verificación rechazada", clase: "bg-white border border-error/40", detalle: "No pudimos verificar tus datos." },
 } as const;
 
-export default function Cuenta() {
+export default function Cuenta({ enPanel = false }: { enPanel?: boolean }) {
   const { session, perfil, verificacion, cerrarSesion } = useAuth();
   const estado = verificacion ? textos[verificacion.status] : null;
 
+  const Contenedor = enPanel ? "div" : "main";
   return (
-    <main className="mx-auto max-w-xl space-y-5 px-4 py-10">
-      <h1 className="font-display text-3xl font-extrabold text-pino">Mi cuenta</h1>
+    <Contenedor className={enPanel ? "max-w-xl space-y-5" : "mx-auto max-w-xl space-y-5 px-4 py-10"}>
+      {!enPanel && <h1 className="font-display text-3xl font-extrabold text-pino">Mi cuenta</h1>}
       <section className="rounded-xl border border-borde bg-white p-4">
         <p className="font-bold">{perfil?.full_name || "Sin nombre registrado"}</p>
         <p className="text-suave">{perfil?.email ?? session?.user.email}</p>
       </section>
 
-      <Invitaciones />
+      {enPanel && perfil && <EditarTelefono key={perfil.id} />}
+      {!enPanel && <Invitaciones />}
 
       {!verificacion && (
         <section className="space-y-2 rounded-xl bg-maiz-suave p-4">
@@ -42,11 +45,14 @@ export default function Cuenta() {
         </section>
       )}
 
-      <div className="flex flex-wrap gap-3">
+      {!enPanel && <div className="flex flex-wrap gap-3">
         <Link to="/vendedor/mis-tiendas" className={clasesBoton("contorno")}>Mis tiendas</Link>
         {perfil?.is_admin && <Link to="/admin" className={clasesBoton("contorno")}>Panel administrativo</Link>}
-        <Boton variante="contorno" onClick={() => void cerrarSesion()}>Cerrar sesión</Boton>
-      </div>
-    </main>
+        <div className="flex max-w-full flex-wrap gap-3">
+          <Link to="/comprador" className={clasesBoton("contorno")}>Panel del comprador</Link>
+          <Boton variante="contorno" onClick={() => void cerrarSesion()}>Cerrar sesión</Boton>
+        </div>
+      </div>}
+    </Contenedor>
   );
 }

@@ -150,7 +150,7 @@ const select: Record<Clase, string> = {
   sancion: "id,user_id,type,reason,ends_at,source_type,source_id,appeal_text,appeal_status,created_at",
 };
 
-export function ListaCasos({ clase, rol, pedido }: { clase: Clase; rol: Rol; pedido?: string }) {
+export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas }: { clase: Clase; rol: Rol; pedido?: string; tiendas?: string[] }) {
   const uid = useUid();
   const tiendas = useQuery({
     queryKey: ["casos", uid, "tiendas-pedidos"],
@@ -162,11 +162,12 @@ export function ListaCasos({ clase, rol, pedido }: { clase: Clase; rol: Rol; ped
     },
   });
   const consulta = useQuery({
-    queryKey: ["casos", uid, clase, rol, pedido],
+    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas],
     enabled: Boolean(uid && supabase),
     queryFn: async () => {
       const base = supabase!.from(tablaCasos(clase)).select(select[clase]);
       if (pedido) base.eq("order_id", pedido);
+      if (clase === "reclamo" && idsTiendas) base.in("store_id", idsTiendas);
       if (clase === "sancion" && rol !== "admin") base.eq("user_id", uid);
       const { data, error } = await base.order("created_at", { ascending: false });
       if (error) throw error;

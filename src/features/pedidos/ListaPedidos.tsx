@@ -1,6 +1,8 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { clasesBoton } from "@/components/Boton";
 import { soles } from "@/lib/format";
+import SelectorTiendaVendedor from "@/features/vendedor/SelectorTiendaVendedor";
+import { useMisTiendas, usePermisosPorTienda } from "@/features/tiendas/hooks";
 import { usePedidos } from "./hooks";
 import { etiquetaEstado, rutaPedido, type Pedido } from "./tipos";
 
@@ -31,15 +33,38 @@ function Tarjeta({ p, rol }: { p: Pedido; rol: Rol }) {
 
 export default function ListaPedidos({ rol, soloEvidencias = false }: { rol: Rol; soloEvidencias?: boolean }) {
   const { data, isLoading, error } = usePedidos();
-  const lista = (data ?? []).filter((p) => p.mi_rol === rol && (!soloEvidencias || p.estado === "compra_coordinada" || p.estado === "en_preparacion" || p.estado === "oferta_aceptada"));
+  const [parametros, setParametros] = useSearchParams();
+  const filtroTienda = rol === "vendedor" ? parametros.get("tienda") : null;
+  const tiendas = useMisTiendas(rol === "vendedor");
+  const permisos = usePermisosPorTienda(rol === "vendedor");
+  const disponibles = (tiendas.data ?? []).filter((t) => permisos.data?.get(t.id)?.has("gestionar_pedidos"));
+  const estadoCompra = rol === "comprador" ? parametros.get("estado") ?? "" : "";
+  const coincideEstado = (p: Pedido) => {
+    if (estadoCompra === "en-curso") return p.estado !== "completada" && p.estado !== "cancelada";
+    if (estadoCompra === "completada" || estadoCompra === "cancelada") return p.estado === estadoCompra;
+    return true;
+  };
+  const lista = (data ?? []).filter((p) => p.mi_rol === rol && coincideEstado(p) && (!filtroTienda || p.store_id === filtroTienda)
+    && (!soloEvidencias || p.estado === "compra_coordinada" || p.estado === "en_preparacion"));
   return (
     <div className="space-y-4">
+      {rol === "comprador" && <label className="block max-w-xs font-bold">Estado de la compra
+        <select className="mt-1 block min-h-11 w-full rounded-lg border border-borde bg-white px-3"
+          value={estadoCompra} onChange={(e) => setParametros(e.target.value ? { estado: e.target.value } : {})}>
+          <option value="">Todas las compras</option>
+          <option value="en-curso">En curso</option>
+          <option value="completada">Completadas</option>
+          <option value="cancelada">Canceladas</option>
+        </select>
+      </label>}
+      {rol === "vendedor" && <SelectorTiendaVendedor tiendas={disponibles} />}
+      {rol === "vendedor" && (tiendas.isError || permisos.isError) && <p role="alert" className="text-error">No se pudo cargar el filtro por tienda.</p>}
       {soloEvidencias && <p className="text-suave">Pedidos que todavía están en preparación. Antes de enviar un pedido a domicilio debes subir las 4 fotos obligatorias.</p>}
       {isLoading && <p className="text-suave">Cargando…</p>}
       {error && <p role="alert" className="text-error">No se pudieron cargar los pedidos.</p>}
-      {!isLoading && lista.length === 0 && (
+      {!isLoading && !error && lista.length === 0 && (
         <p className="rounded-xl bg-white p-6 text-suave">
-          {soloEvidencias ? "No tienes pedidos pendientes de evidencias." : rol === "comprador" ? "Aún no tienes compras. Cuando elijas una oferta aparecerá aquí." : "Aún no tienes pedidos. Aparecen cuando un comprador elige tu oferta."}
+          {estadoCompra ? "No hay compras con ese estado." : soloEvidencias ? "No tienes pedidos pendientes de evidencias." : rol === "comprador" ? "Aún no tienes compras. Cuando elijas una oferta aparecerá aquí." : "Aún no tienes pedidos. Aparecen cuando un comprador elige tu oferta."}
         </p>
       )}
       <ul className="space-y-3">{lista.map((p) => <Tarjeta key={p.order_id} p={p} rol={rol} />)}</ul>

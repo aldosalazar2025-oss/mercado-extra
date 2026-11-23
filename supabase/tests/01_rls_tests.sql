@@ -1246,6 +1246,36 @@ update public.promotions set ends_at = now() - interval '1 minute' where product
 select t.anon();
 select t.ok(public.inicio_destacados()->'productos'->0->>'id' = t.u(201)::text, 'una promoción vencida pierde prioridad en Inicio');
 
+-- Etapa 17. Panel del vendedor y alcance de los permisos.
+select t.anon();
+select t.ok(t.falla('select public.panel_vendedor()'), 'un visitante no puede consultar el panel del vendedor');
+select t.como(t.u(2));
+select t.ok(t.n(format('select 1 from public.panel_vendedor() where tienda_id = %L', t.u(104))) = 1,
+  'el vendedor ve la tienda que registró');
+select t.root();
+insert into auth.users (id, email) values (t.u(8999), 'sin-tiendas@example.test');
+select t.como(t.u(8999));
+select t.ok(t.n('select 1 from public.panel_vendedor()') = 0, 'una cuenta sin tiendas no recibe métricas ajenas');
+select t.como(t.u(3));
+select t.ok((select productos > 0 and ofertas is not null and pedidos is not null and pedidos_periodo > 0
+  from public.panel_vendedor() where tienda_id = t.u(101)), 'el propietario ve el resumen y las estadísticas de su tienda');
+select t.ok(t.n(format('select 1 from public.panel_vendedor() where tienda_id = %L', t.u(102))) = 0, 'el propietario no ve otras tiendas');
+select t.como(t.u(5));
+select t.ok((select ofertas is not null and pedidos is not null and pedidos_periodo is null and importe_acordado is null
+  from public.panel_vendedor() where tienda_id = t.u(101)), 'un vendedor sin permiso de estadísticas solo ve sus métricas operativas');
+select t.como(t.u(6));
+select t.ok((select productos > 0 and solicitudes is null and ofertas is null and pedidos is null and reclamos is null
+  and pedidos_periodo is null and calificaciones is null from public.panel_vendedor() where tienda_id = t.u(101)),
+  'el encargado de catálogo solo ve sus productos');
+select t.como(t.u(7));
+select t.ok(t.n('select 1 from public.panel_vendedor()') = 0, 'el permiso de administrador de la plataforma no amplía el panel del vendedor');
+select t.root();
+update public.orders set created_at = now() - interval '120 days' where store_id = t.u(101);
+select t.como(t.u(3));
+select t.ok((select pedidos_periodo = 0 and completados = 0 and importe_acordado = 0
+  from public.panel_vendedor(90) where tienda_id = t.u(101)), 'los pedidos antiguos quedan fuera del periodo seleccionado');
+select t.ok((select pedidos_periodo > 0 from public.panel_vendedor() where tienda_id = t.u(101)), 'todo el historial incluye pedidos antiguos');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

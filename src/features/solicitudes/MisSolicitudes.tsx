@@ -7,7 +7,7 @@ import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 import { COLUMNAS_SOLICITUD, etiquetaSolicitud, tiempoRestante, type EstadoSolicitud, type Solicitud } from "./tipos";
 
-export default function MisSolicitudes() {
+export default function MisSolicitudes({ soloOfertas = false }: { soloOfertas?: boolean }) {
   const { session } = useAuth();
   const uid = session?.user.id;
   const cliente = useQueryClient();
@@ -49,18 +49,21 @@ export default function MisSolicitudes() {
     if (!pregunta || confirm(pregunta)) cambiar.mutate({ id, estado });
   };
 
+  const filas = (lista.data ?? []).filter((s) => !soloOfertas
+    || ((s.status === "con_ofertas" || s.status === "atendida") && s.offers.some((oferta) => oferta.status === "enviada" || oferta.status === "aceptada")));
+
   return (
     <div className="space-y-4">
-      <div>
+      {!soloOfertas && <div>
         <Link to="/solicitar" className={clasesBoton("primario")}>Publicar una solicitud</Link>
         <p className="mt-2 text-sm text-suave">Cada solicitud dura 24 horas. Si no recibe ofertas, puedes renovarla, modificarla o eliminarla.</p>
-      </div>
+      </div>}
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}
       {lista.isLoading && <p className="text-suave">Cargando…</p>}
       {lista.error && <p role="alert" className="text-error">No se pudieron cargar tus solicitudes.</p>}
-      {lista.data?.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">Aún no publicaste solicitudes. Cuéntanos qué necesitas y las tiendas te harán ofertas.</p>}
+      {lista.isSuccess && filas.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">{soloOfertas ? "Aún no tienes ofertas para comparar ni ofertas elegidas." : "Aún no publicaste solicitudes. Cuéntanos qué necesitas y las tiendas te harán ofertas."}</p>}
       <ul className="space-y-3">
-        {lista.data?.map((s) => {
+        {filas.map((s) => {
           const e = etiquetaSolicitud[s.status];
           const carac = [s.attributes.talla && `Talla: ${s.attributes.talla}`, s.attributes.color && `Color: ${s.attributes.color}`, s.attributes.modelo && `Modelo: ${s.attributes.modelo}`].filter(Boolean).join(" · ");
           const ocupado = cambiar.isPending;
@@ -82,7 +85,7 @@ export default function MisSolicitudes() {
               {s.status === "vencida" && <p className="rounded-lg bg-maiz-suave p-3 text-sm">Esta solicitud venció sin recibir ofertas. Renuévala para darle 24 horas más.</p>}
               <div className="flex flex-wrap gap-2">
                 {(s.status === "con_ofertas" || s.status === "atendida") && (
-                  <Link to={`/comprador/mis-solicitudes/${s.id}/ofertas`} className={clasesBoton("primario")}>{s.status === "con_ofertas" ? "Ver y comparar ofertas" : "Ver la oferta elegida"}</Link>
+                  <Link to={soloOfertas ? `/comprador/ofertas-recibidas/${s.id}` : `/comprador/mis-solicitudes/${s.id}/ofertas`} className={clasesBoton("primario")}>{s.status === "con_ofertas" ? "Ver y comparar ofertas" : "Ver la oferta elegida"}</Link>
                 )}
                 {s.status === "vencida" && <Boton variante="secundario" disabled={ocupado} onClick={() => pedir(s.id, "abierta")}>Renovar 24 horas</Boton>}
                 {(s.status === "abierta" || s.status === "vencida") && <Link to={`/comprador/mis-solicitudes/${s.id}/editar`} className={clasesBoton("contorno")}>Modificar</Link>}

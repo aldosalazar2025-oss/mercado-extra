@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton, { clasesBoton } from "@/components/Boton";
 import { estiloInput } from "@/components/Campo";
@@ -15,7 +15,8 @@ type Fila = {
 
 export default function MisProductos() {
   const tiendas = useMisTiendas();
-  const [elegida, setElegida] = useState<string>("");
+  const [parametros, setParametros] = useSearchParams();
+  const elegida = parametros.get("tienda");
   const [mensaje, setMensaje] = useState<string | null>(null);
   const cliente = useQueryClient();
   const porTienda = usePermisosPorTienda();
@@ -48,6 +49,7 @@ export default function MisProductos() {
     onError: (e) => setMensaje(e instanceof Error ? e.message : "Error"),
   });
 
+  if (tiendas.isError || porTienda.isError) return <p role="alert" className="text-error">No se pudieron cargar las tiendas o sus permisos.</p>;
   if (tiendas.isLoading || porTienda.isLoading) return <p className="text-suave">Cargando…</p>;
   if (!tienda && (tiendas.data?.length ?? 0) > 0) {
     return <p className="rounded-xl bg-white p-6 text-suave">Ninguna de tus tiendas te da permiso para gestionar productos. Si lo necesitas, pídeselo al propietario.</p>;
@@ -66,7 +68,7 @@ export default function MisProductos() {
         {gestionables.length > 1 && (
           <div className="min-w-[220px]">
             <label htmlFor="tienda-productos" className="block font-bold">Tienda</label>
-            <select id="tienda-productos" className={estiloInput} value={tienda.id} onChange={(e) => setElegida(e.target.value)}>
+            <select id="tienda-productos" className={estiloInput} value={tienda.id} onChange={(e) => setParametros({ tienda: e.target.value })}>
               {gestionables.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>

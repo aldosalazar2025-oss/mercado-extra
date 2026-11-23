@@ -95,7 +95,7 @@ function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
   );
 }
 
-export default function OfertasSolicitud() {
+export default function OfertasSolicitud({ desdeBandeja = false }: { desdeBandeja?: boolean }) {
   const { id } = useParams();
   const { session } = useAuth();
   const cliente = useQueryClient();
@@ -155,7 +155,7 @@ export default function OfertasSolicitud() {
     onError: (e) => { setMensaje({ texto: e instanceof Error ? e.message : "Error", error: true }); refrescar(); },
   });
 
-  const volver = <p><Link to="/comprador/mis-solicitudes" className="font-bold text-mercado underline">← Mis solicitudes</Link></p>;
+  const volver = <p><Link to={desdeBandeja ? "/comprador/ofertas-recibidas" : "/comprador/mis-solicitudes"} className="font-bold text-mercado underline">← {desdeBandeja ? "Ofertas recibidas" : "Mis solicitudes"}</Link></p>;
   if (consulta.isLoading) return <p className="text-suave">Cargando…</p>;
   const d = consulta.data;
   if (!d?.solicitud) return <div className="space-y-3">{volver}<p className="rounded-xl bg-white p-6 text-suave">No encontramos esa solicitud.</p></div>;

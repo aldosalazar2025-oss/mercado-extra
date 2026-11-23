@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton, { clasesBoton } from "@/components/Boton";
 import { useMisTiendas, usePermisosPorTienda } from "@/features/tiendas/hooks";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
+import SelectorTiendaVendedor from "@/features/vendedor/SelectorTiendaVendedor";
 import { etiquetaOferta, ordenarVersiones, propuestaPendiente, versionVigente, type EstadoOferta, type Version } from "./tipos";
 
 type Fila = {
@@ -19,7 +20,10 @@ export default function MisOfertas() {
   const cliente = useQueryClient();
   const [mensaje, setMensaje] = useState<string | null>(null);
   const permisos = usePermisosPorTienda();
-  const ids = (tiendas.data ?? []).filter((t) => permisos.data?.get(t.id)?.has("enviar_ofertas")).map((t) => t.id);
+  const [parametros] = useSearchParams();
+  const tienda = parametros.get("tienda");
+  const disponibles = (tiendas.data ?? []).filter((t) => permisos.data?.get(t.id)?.has("enviar_ofertas"));
+  const ids = disponibles.filter((t) => !tienda || t.id === tienda).map((t) => t.id);
 
   const lista = useQuery({
     queryKey: ["mis-ofertas", ids.join("|")],
@@ -46,14 +50,17 @@ export default function MisOfertas() {
     onError: (e) => setMensaje(e instanceof Error ? e.message : "Error"),
   });
 
+  if (tiendas.isError || permisos.isError) return <p role="alert" className="text-error">No se pudieron cargar las tiendas o sus permisos.</p>;
   if (tiendas.isLoading || permisos.isLoading) return <p className="text-suave">Cargando…</p>;
-  if (ids.length === 0) return <p className="rounded-xl bg-white p-6 text-suave">Aún no tienes tiendas. Registra una en <Link to="/vendedor/mis-tiendas" className="font-bold text-mercado underline">Mis tiendas</Link>.</p>;
+  if (disponibles.length === 0) return <p className="rounded-xl bg-white p-6 text-suave">Aún no tienes tiendas. Registra una en <Link to="/vendedor/mis-tiendas" className="font-bold text-mercado underline">Mis tiendas</Link>.</p>;
 
   return (
     <div className="space-y-4">
+      <SelectorTiendaVendedor tiendas={disponibles} />
+      {ids.length === 0 && <p className="text-suave">Elige una tienda donde tengas permiso para enviar ofertas.</p>}
       <p className="text-suave">Las ofertas que enviaste y cómo van. Si cambias un precio, se envía como una nueva propuesta y la anterior queda en el historial.</p>
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}
-      {lista.isLoading && <p className="text-suave">Cargando…</p>}
+      {ids.length > 0 && lista.isLoading && <p className="text-suave">Cargando…</p>}
       {lista.error && <p role="alert" className="text-error">No se pudieron cargar tus ofertas.</p>}
       {lista.data?.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">Aún no enviaste ofertas. Revisa <Link to="/vendedor/solicitudes-recibidas" className="font-bold text-mercado underline">Solicitudes recibidas</Link>.</p>}
       <ul className="space-y-3">

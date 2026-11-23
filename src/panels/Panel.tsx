@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
+import ResumenComprador from "@/features/comprador/ResumenComprador";
+import Cuenta from "@/features/identidad/Cuenta";
+import ReclamosVendedor from "@/features/vendedor/ReclamosVendedor";
+import ResumenVendedor from "@/features/vendedor/ResumenVendedor";
 import MonetizacionVendedor from "@/features/monetizacion/MonetizacionVendedor";
 import { AdminPlanes } from "@/features/monetizacion/Planes";
 import SolicitudesComerciales from "@/features/monetizacion/SolicitudesComerciales";
@@ -21,13 +25,9 @@ import MisTiendas from "@/features/tiendas/MisTiendas";
 import { useMisPermisos } from "@/features/tiendas/hooks";
 import { paneles, permisoSeccion, slug, type PanelId } from "./config";
 
-const resumenDemo = [
-  { etiqueta: "Solicitudes abiertas", valor: "3" },
-  { etiqueta: "Ofertas nuevas", valor: "7" },
-  { etiqueta: "Compras completadas", valor: "12" },
-];
-
 function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
+  if (panel === "vendedor" && seccion === "Resumen") return <ResumenVendedor />;
+  if (panel === "vendedor" && seccion === "Estadísticas") return <ResumenVendedor key="estadisticas" estadisticas />;
   if (panel === "admin" && seccion === "Planes comerciales") return <AdminPlanes />;
   if (panel === "admin" && seccion === "Promociones") return <SolicitudesComerciales tipo="promocion" admin />;
   if (panel === "vendedor" && seccion === "Promociones y planes") return <MonetizacionVendedor />;
@@ -36,10 +36,14 @@ function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
     return <RegistrosAdmin key={seccion} seccion={seccion} />;
   }
   if (panel === "admin" && seccion === "Verificación de identidad") return <AdminVerificaciones />;
+  if (panel === "vendedor" && seccion === "Reclamos") return <ReclamosVendedor />;
   if (seccion === "Reclamos") return <ListaCasos rol={panel} clase="reclamo" />;
   if (seccion === "Cancelaciones") return <ListaCasos rol={panel} clase="cancelacion" />;
   if (seccion === "Sanciones") return <ListaCasos rol={panel} clase="sancion" />;
   if (panel === "admin" && seccion === "Tiendas") return <AdminTiendas />;
+  if (panel === "comprador" && seccion === "Inicio") return <ResumenComprador />;
+  if (panel === "comprador" && seccion === "Ofertas recibidas") return <MisSolicitudes key="ofertas-recibidas" soloOfertas />;
+  if (panel === "comprador" && seccion === "Mi perfil") return <Cuenta enPanel />;
   if (panel === "comprador" && seccion === "Mis solicitudes") return <MisSolicitudes />;
   if (panel === "admin" && seccion === "Categorías") return <AdminCategorias />;
   if (panel === "admin" && seccion === "Productos") return <AdminProductos />;
@@ -75,8 +79,10 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
   const pedida = seccionFija ?? todas.find((s) => slug(s) === seccion) ?? todas[0];
   const sinAcceso = panel === "vendedor" && !misPermisos.isLoading && !visibles(pedida);
   const actual = pedida;
-  const esResumen = panel !== "admin" && !contenido && actual === todas[0];
-  const real = sinAcceso ? (
+  const verificaAcceso = panel === "vendedor" && Boolean(permisoSeccion[actual]);
+  const real = verificaAcceso && misPermisos.isLoading ? <p className="text-suave">Consultando permisos…</p>
+    : verificaAcceso && misPermisos.isError ? <p role="alert" className="text-error">No se pudieron consultar tus permisos.</p>
+    : sinAcceso ? (
     <p className="rounded-xl bg-white p-6 text-suave">Tu rol en tus tiendas no incluye esta sección. Si la necesitas, pídele al propietario que te dé el permiso.</p>
   ) : (
     contenido ?? contenidoDe(panel, actual)
@@ -84,7 +90,7 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 md:grid-cols-[240px_1fr]">
-      <nav aria-label={titulo} className="md:sticky md:top-20 md:self-start">
+      <nav aria-label={titulo} className="md:sticky md:top-20 md:max-h-[calc(100dvh-5.5rem)] md:self-start md:overflow-y-auto">
         <p className="mb-2 font-display text-lg font-extrabold text-pino">{titulo}</p>
         <ul className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:gap-1 md:overflow-visible">
           {secciones.map((s) => (
@@ -103,21 +109,7 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
 
       <main className="min-w-0 space-y-4">
         <h1 className="font-display text-3xl font-extrabold text-pino">{actual}</h1>
-        {esResumen && (
-          <ul className="grid gap-3 sm:grid-cols-3">
-            {resumenDemo.map((r) => (
-              <li key={r.etiqueta} className="rounded-xl border border-borde bg-white p-4">
-                <p className="text-3xl font-extrabold text-pino">{r.valor}</p>
-                <p className="text-sm text-suave">{r.etiqueta} (ejemplo)</p>
-              </li>
-            ))}
-          </ul>
-        )}
-        {real ?? (
-          <p className="rounded-xl bg-white p-6 text-suave">
-            Vista previa del diseño con datos de ejemplo. Esta sección se vuelve funcional en una etapa posterior.
-          </p>
-        )}
+        {real}
         <p className="text-sm">
           <Link to="/" className="font-bold text-mercado underline">Volver al inicio</Link>
         </p>

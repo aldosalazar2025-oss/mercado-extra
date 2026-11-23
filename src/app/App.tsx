@@ -67,6 +67,7 @@ export default function App() {
           <Route path="/vendedor/pedidos/:orderId" element={<Panel panel="vendedor" seccion="Pedidos" contenido={<PedidoDetalle rol="vendedor" />} />} />
           <Route path="/comprador/chat/:conversacionId" element={<Panel panel="comprador" seccion="Chat" contenido={<ChatPanel rol="comprador" />} />} />
           <Route path="/vendedor/chat/:conversacionId" element={<Panel panel="vendedor" seccion="Chat" contenido={<ChatPanel rol="vendedor" />} />} />
+          <Route path="/comprador/ofertas-recibidas/:id" element={<Panel panel="comprador" seccion="Ofertas recibidas" contenido={<OfertasSolicitud desdeBandeja />} />} />
           <Route path="/comprador/mis-solicitudes/:id/ofertas" element={<Panel panel="comprador" seccion="Mis solicitudes" contenido={<OfertasSolicitud />} />} />
           <Route path="/vendedor/solicitudes-recibidas/:requestId/oferta" element={<Panel panel="vendedor" seccion="Solicitudes recibidas" contenido={<OfertaEditor />} />} />
           <Route path="/comprador/mis-solicitudes/:id/editar" element={<Panel panel="comprador" seccion="Mis solicitudes" contenido={<SolicitudEditor />} />} />

@@ -6,12 +6,12 @@ import { COLUMNAS_TIENDA, type Tienda } from "./tipos";
 export type MiTienda = Tienda & { miRol: string };
 
 // Tiendas donde la persona es propietaria o empleada activa.
-export function useMisTiendas() {
+export function useMisTiendas(habilitado = true) {
   const { session } = useAuth();
   const uid = session?.user.id;
   return useQuery({
     queryKey: ["mis-tiendas", uid],
-    enabled: Boolean(uid && supabase),
+    enabled: Boolean(habilitado && uid && supabase),
     queryFn: async (): Promise<MiTienda[]> => {
       if (!supabase || !uid) return [];
       const m = await supabase.from("store_members").select("store_id,role_code").eq("user_id", uid).eq("status", "activo");
@@ -66,6 +66,7 @@ export function useMisPermisos(habilitado: boolean) {
         supabase.from("store_members").select("role_code,extra_permissions").eq("user_id", uid).eq("status", "activo"),
         supabase.from("role_permissions").select("role_code,permission_code"),
       ]);
+      if (m.error || rp.error) throw m.error ?? rp.error;
       const porRol = new Map<string, string[]>();
       (rp.data ?? []).forEach((x) => porRol.set(x.role_code as string, [...(porRol.get(x.role_code as string) ?? []), x.permission_code as string]));
       (m.data ?? []).forEach((fila) => {
@@ -78,12 +79,12 @@ export function useMisPermisos(habilitado: boolean) {
 }
 
 // Permisos de la persona en cada una de sus tiendas (tienda -> conjunto de permisos).
-export function usePermisosPorTienda() {
+export function usePermisosPorTienda(habilitado = true) {
   const { session } = useAuth();
   const uid = session?.user.id;
   return useQuery({
     queryKey: ["permisos-por-tienda", uid],
-    enabled: Boolean(uid && supabase),
+    enabled: Boolean(habilitado && uid && supabase),
     queryFn: async () => {
       const mapa = new Map<string, Set<string>>();
       if (!supabase || !uid) return mapa;
@@ -91,6 +92,7 @@ export function usePermisosPorTienda() {
         supabase.from("store_members").select("store_id,role_code,extra_permissions").eq("user_id", uid).eq("status", "activo"),
         supabase.from("role_permissions").select("role_code,permission_code"),
       ]);
+      if (m.error || rp.error) throw m.error ?? rp.error;
       const porRol = new Map<string, string[]>();
       (rp.data ?? []).forEach((x) => porRol.set(x.role_code as string, [...(porRol.get(x.role_code as string) ?? []), x.permission_code as string]));
       (m.data ?? []).forEach((f) => {
