@@ -1,3 +1,5 @@
+import InsigniaPlan from "./InsigniaPlan";
+import type { MedallaPlan } from "@/features/monetizacion/datos";
 import { Link } from "react-router-dom";
 import { km } from "@/lib/format";
 import { urlPublica } from "@/lib/storage";
@@ -13,7 +15,7 @@ export type TiendaCard = {
   distanciaKm: number | null;
 };
 
-export default function TarjetaTienda({ t, promocionada = false }: { t: TiendaCard; promocionada?: boolean }) {
+export default function TarjetaTienda({ t, promocionada = false, medalla }: { t: TiendaCard; promocionada?: boolean; medalla?: MedallaPlan | null }) {
   const logo = urlPublica(t.logo_path);
   return (
     <article className="flex gap-4 rounded-xl border border-borde bg-white p-4">
@@ -28,6 +30,7 @@ export default function TarjetaTienda({ t, promocionada = false }: { t: TiendaCa
         {promocionada && <span className="inline-block rounded-full bg-maiz-suave px-2 py-0.5 text-xs font-bold">Promocionada</span>}
         <h3 className="font-display text-lg font-bold leading-snug">
           <Link to={`/tiendas/${t.id}`} className="hover:underline">{t.name}</Link>
+          {medalla && <InsigniaPlan medalla={medalla} />}
         </h3>
         <p className="text-sm text-suave">
           {[t.categorias.join(", "), t.address, t.distanciaKm !== null ? `a ${km(t.distanciaKm)}` : null].filter(Boolean).join(" · ")}

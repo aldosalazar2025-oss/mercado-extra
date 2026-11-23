@@ -1168,7 +1168,7 @@ select t.ok(t.n($q$select 1 from public.audit_logs where action in ('cambiar_est
 select t.como(t.u(3));
 select t.ok(t.falla($q$select public.admin_guardar_plan(null, 'No autorizado', 10, 2, true)$q$), 'un vendedor no crea planes');
 select t.como(t.u(7));
-select public.admin_guardar_plan(null, 'Plan de prueba', 19.90, 2, true);
+select public.admin_guardar_plan(null, 'Plan de prueba', 19.90, 2, true, 'plata');
 select t.anon();
 select t.ok(t.n($q$select 1 from public.subscription_plans where name = 'Plan de prueba'$q$) = 1, 'un visitante puede consultar planes disponibles');
 select t.como(t.u(5));
@@ -1216,6 +1216,35 @@ select t.ok(t.n(format('select 1 from public.promotions where product_id = %L an
 select t.anon();
 select t.ok(t.n(format('select 1 from public.catalogo_promocionado(array[]::uuid[], array[%L]::uuid[])', t.u(201))) = 0,
   'una promoción rechazada no se publica en el catálogo');
+
+-- Prioridad pública de Inicio y vigencia de las insignias.
+select t.como(t.u(7));
+select public.admin_guardar_plan(null, 'Plan básico de portada', 5, 1, true, 'oro');
+select t.como(t.u(4));
+select public.solicitar_plan_comercial(t.u(102), (select id from public.subscription_plans where name = 'Plan básico de portada'));
+select public.solicitar_promocion(t.u(102), t.u(202), 7);
+select t.como(t.u(3));
+select public.solicitar_promocion(t.u(101), t.u(201), 7);
+select t.como(t.u(7));
+select public.decidir_plan_comercial(id, 'activar', 'Plan de portada aprobado') from public.subscriptions where store_id = t.u(102) and status = 'pendiente';
+select public.decidir_promocion(id, 'activar', 'Producto aprobado en portada') from public.promotions where product_id in (t.u(201), t.u(202)) and status = 'pendiente';
+select t.anon();
+select t.ok(public.inicio_destacados()->'productos'->0->>'id' = t.u(201)::text
+  and public.inicio_destacados()->'productos'->1->>'id' = t.u(202)::text, 'entre promociones de Inicio va primero la del plan mayor');
+select t.ok(public.inicio_destacados()->'tiendas'->0->>'id' = t.u(101)::text
+  and public.inicio_destacados()->'tiendas'->0->>'medalla' = 'plata'
+  and public.inicio_destacados()->'tiendas'->0->>'plan_precio' is null, 'Inicio muestra la medalla elegida sin publicar el precio del plan');
+select t.ok(not exists (select 1 from jsonb_array_elements(public.inicio_destacados()->'productos') as p where p->>'id' = t.u(203)::text),
+  'Inicio excluye productos ocultos');
+select t.root();
+update public.subscriptions set ends_at = now() - interval '1 minute' where store_id = t.u(101) and status = 'activa';
+select t.anon();
+select t.ok(public.inicio_destacados()->'productos'->0->>'id' = t.u(202)::text
+  and public.inicio_destacados()->'productos'->1->>'medalla' is null, 'un plan vencido pierde la prioridad y la insignia');
+select t.root();
+update public.promotions set ends_at = now() - interval '1 minute' where product_id = t.u(202) and status = 'activa';
+select t.anon();
+select t.ok(public.inicio_destacados()->'productos'->0->>'id' = t.u(201)::text, 'una promoción vencida pierde prioridad en Inicio');
 
 -- 13. Estructura y catálogos
 select t.root();

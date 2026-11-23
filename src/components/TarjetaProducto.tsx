@@ -1,9 +1,11 @@
+import InsigniaPlan from "./InsigniaPlan";
+import type { MedallaPlan } from "@/features/monetizacion/datos";
 import { Link } from "react-router-dom";
 import type { ProductoCatalogo } from "@/features/catalogo/tipos";
 import { km, soles } from "@/lib/format";
 import { urlPublica } from "@/lib/storage";
 
-export default function TarjetaProducto({ p, promocionado = false }: { p: ProductoCatalogo; promocionado?: boolean }) {
+export default function TarjetaProducto({ p, promocionado = false, medalla }: { p: ProductoCatalogo; promocionado?: boolean; medalla?: MedallaPlan | null }) {
   const foto = urlPublica(p.image_path);
   return (
     <article className="flex flex-col overflow-hidden rounded-xl border border-borde bg-white">
@@ -24,6 +26,7 @@ export default function TarjetaProducto({ p, promocionado = false }: { p: Produc
         <p className="text-2xl font-extrabold text-pino">{soles(p.price)}</p>
         <p className="text-sm text-suave">
           <Link to={`/tiendas/${p.store_id}`} className="font-semibold hover:underline">{p.store_name}</Link>
+          {medalla && <InsigniaPlan medalla={medalla} />}
           {p.distancia_km !== null && ` · a ${km(p.distancia_km)}`}
         </p>
         <p className={`mt-auto w-fit rounded-full px-3 py-1 text-sm font-bold ${p.available ? "bg-hoja text-pino" : "bg-borde text-suave"}`}>

@@ -4,7 +4,8 @@ import Demo from "@/components/Demo";
 import { clasesBoton } from "@/components/Boton";
 import TarjetaProducto from "@/components/TarjetaProducto";
 import TarjetaTienda, { type TiendaCard } from "@/components/TarjetaTienda";
-import { buscarProductos } from "@/features/catalogo/hooks";
+import type { MedallaPlan } from "@/features/monetizacion/datos";
+import type { ProductoCatalogo } from "@/features/catalogo/tipos";
 import { supabase } from "@/lib/supabase";
 
 const pasos = [
@@ -15,19 +16,17 @@ const pasos = [
 ];
 
 export default function Inicio() {
-  const productos = useQuery({ queryKey: ["inicio-productos"], queryFn: () => buscarProductos({}, 0, 3) });
-  const tiendas = useQuery({
-    queryKey: ["inicio-tiendas"],
-    queryFn: async (): Promise<TiendaCard[]> => {
-      if (!supabase) return [];
-      const { data } = await supabase
-        .from("stores")
-        .select("id,name,address,logo_path,offers_delivery,offers_pickup,store_categories(categories(name))")
-        .eq("status", "aprobada").order("created_at", { ascending: false }).limit(2);
-      return ((data ?? []) as unknown as (Omit<TiendaCard, "categorias" | "distanciaKm"> & { store_categories: { categories: { name: string } | null }[] })[]).map((s) => ({
-        id: s.id, name: s.name, address: s.address, logo_path: s.logo_path, offers_delivery: s.offers_delivery, offers_pickup: s.offers_pickup,
-        categorias: s.store_categories.map((c) => c.categories?.name).filter((n): n is string => Boolean(n)), distanciaKm: null,
-      }));
+  const inicio = useQuery({
+    queryKey: ["inicio-destacados"],
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      if (!supabase) return { productos: [], tiendas: [] };
+      const { data, error } = await supabase.rpc("inicio_destacados");
+      if (error) throw error;
+      return data as {
+        productos: (ProductoCatalogo & { medalla: MedallaPlan | null; promocionado: boolean })[];
+        tiendas: (TiendaCard & { medalla: MedallaPlan | null; promocionada: boolean })[];
+      };
     },
   });
   return (
@@ -61,20 +60,22 @@ export default function Inicio() {
 
       <section className="mx-auto max-w-6xl px-4 pt-14">
         <div className="flex items-end justify-between gap-4">
-          <h2 className="font-display text-3xl font-extrabold text-pino">Productos recientes</h2>
+          <h2 className="font-display text-3xl font-extrabold text-pino">Productos de las tiendas</h2>
           <Link to="/productos" className="font-bold text-mercado underline">Ver todos</Link>
         </div>
-        {productos.data?.length === 0 && <p className="mt-6 rounded-xl bg-white p-6 text-suave">Pronto verás aquí los productos de las tiendas. Mientras tanto, publica una solicitud y las tiendas te ofrecerán lo que buscas.</p>}
+        {inicio.isPending && <p className="mt-6 text-suave">Cargando productos y tiendas…</p>}
+        {inicio.isError && <p role="alert" className="mt-6 text-error">No se pudo cargar el catálogo de Inicio.</p>}
+        {inicio.data?.productos.length === 0 && <p className="mt-6 rounded-xl bg-white p-6 text-suave">Pronto verás aquí los productos de las tiendas. Mientras tanto, publica una solicitud y las tiendas te ofrecerán lo que buscas.</p>}
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {productos.data?.map((p) => <TarjetaProducto key={p.id} p={p} />)}
+          {inicio.data?.productos.map((p) => <TarjetaProducto key={p.id} p={p} promocionado={p.promocionado} medalla={p.medalla} />)}
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-4 pt-14">
         <h2 className="font-display text-3xl font-extrabold text-pino">Tiendas afiliadas</h2>
-        {tiendas.data?.length === 0 && <p className="mt-6 rounded-xl bg-white p-6 text-suave">Aún no hay tiendas aprobadas.</p>}
+        {inicio.data?.tiendas.length === 0 && <p className="mt-6 rounded-xl bg-white p-6 text-suave">Aún no hay tiendas aprobadas.</p>}
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          {tiendas.data?.map((t) => <TarjetaTienda key={t.id} t={t} />)}
+          {inicio.data?.tiendas.map((t) => <TarjetaTienda key={t.id} t={t} promocionada={t.promocionada} medalla={t.medalla} />)}
         </div>
       </section>
 

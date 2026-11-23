@@ -2,7 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/features/auth/AuthContext";
 import { supabase } from "@/lib/supabase";
 
-export type Plan = { id: string; name: string; price_month: number; max_promociones: number; active: boolean };
+export type MedallaPlan = "bronce" | "plata" | "oro";
+
+export type Plan = { id: string; name: string; price_month: number; max_promociones: number; active: boolean; medalla: MedallaPlan | "ninguna" };
 export type SolicitudPlan = {
   id: string; status: string; ends_at: string | null; precio_acordado: number | null; decision: string | null;
   subscription_plans: { name: string } | null; stores: { name: string } | null;
@@ -22,7 +24,7 @@ export function usePlanes(admin = false) {
   return useQuery({
     queryKey: ["monetizacion", session?.user.id, "planes", admin],
     queryFn: async () => {
-      const q = conexion().from("subscription_plans").select("id,name,price_month,max_promociones,active");
+      const q = conexion().from("subscription_plans").select("id,name,price_month,max_promociones,active,medalla");
       if (!admin) q.eq("active", true);
       const { data, error } = await q.order("name").order("id");
       if (error) throw error;
