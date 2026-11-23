@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import Logo from "./Logo";
+import FotoPerfil from "./FotoPerfil";
+import MenuCuenta from "./MenuCuenta";
 import { clasesBoton } from "./Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import Campana from "@/features/notificaciones/Campana";
@@ -14,9 +16,26 @@ const enlaces = [
 const estiloEnlace = ({ isActive }: { isActive: boolean }) =>
   `rounded-lg px-3 py-2 font-bold ${isActive ? "bg-hoja text-pino" : "text-tinta hover:bg-hoja"}`;
 
+function AccesosSesion({ abrirCuenta }: { abrirCuenta: () => void }) {
+  return (
+    <>
+      <LimiteDeErrores discreto><Campana /></LimiteDeErrores>
+      <button type="button" onClick={abrirCuenta} aria-label="Abrir menú de cuenta" aria-haspopup="dialog" aria-controls="menu-cuenta" title="Mi cuenta"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-hoja">
+        <FotoPerfil className="h-9 w-9" />
+      </button>
+    </>
+  );
+}
+
 export default function Navbar() {
   const [abierto, setAbierto] = useState(false);
-  const { session, cerrarSesion } = useAuth();
+  const { session } = useAuth();
+  const panelCuenta = useRef<HTMLDialogElement>(null);
+  const abrirCuenta = () => {
+    setAbierto(false);
+    panelCuenta.current?.showModal();
+  };
   return (
     <header className="sticky top-0 z-20 border-b border-borde bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
@@ -29,20 +48,11 @@ export default function Navbar() {
             <NavLink key={e.to} to={e.to} className={estiloEnlace}>{e.texto}</NavLink>
           ))}
           <a href="/#como-funciona" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja">Cómo funciona</a>
-          {session ? (
-            <>
-              <LimiteDeErrores discreto><Campana /></LimiteDeErrores>
-              <Link to="/cuenta" className={`${clasesBoton("contorno")} ml-1`}>Mi cuenta</Link>
-              <button type="button" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja" onClick={() => void cerrarSesion()}>Salir</button>
-            </>
-          ) : (
-            <Link to="/ingresar" className={`${clasesBoton("contorno")} ml-2`}>Ingresar</Link>
-          )}
-          <Link to="/solicitar" className={clasesBoton("primario")}>Publicar solicitud</Link>
+          <Link to="/solicitar" className={clasesBoton("primario")}>Publicar mi solicitud</Link>
+          {session ? <AccesosSesion abrirCuenta={abrirCuenta} /> : <Link to="/ingresar" className={clasesBoton("contorno")}>Ingresar</Link>}
         </nav>
 
         <div className="flex items-center gap-1 md:hidden">
-          <LimiteDeErrores discreto><Campana /></LimiteDeErrores>
         <button
           type="button"
           className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-borde"
@@ -55,6 +65,7 @@ export default function Navbar() {
             {abierto ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
           </svg>
         </button>
+          {session && <AccesosSesion abrirCuenta={abrirCuenta} />}
         </div>
       </div>
 
@@ -64,17 +75,11 @@ export default function Navbar() {
             <NavLink key={e.to} to={e.to} className={estiloEnlace} onClick={() => setAbierto(false)}>{e.texto}</NavLink>
           ))}
           <a href="/#como-funciona" className="rounded-lg px-3 py-2 font-bold hover:bg-hoja">Cómo funciona</a>
-          <Link to="/solicitar" className={`${clasesBoton("primario")} mt-2`} onClick={() => setAbierto(false)}>Publicar solicitud</Link>
-          {session ? (
-            <>
-              <Link to="/cuenta" className={clasesBoton("contorno")} onClick={() => setAbierto(false)}>Mi cuenta</Link>
-              <button type="button" className="rounded-lg px-3 py-2 text-left font-bold hover:bg-hoja" onClick={() => { setAbierto(false); void cerrarSesion(); }}>Salir</button>
-            </>
-          ) : (
-            <Link to="/ingresar" className={clasesBoton("contorno")} onClick={() => setAbierto(false)}>Ingresar</Link>
-          )}
+          <Link to="/solicitar" className={`${clasesBoton("primario")} mt-2`} onClick={() => setAbierto(false)}>Publicar mi solicitud</Link>
+          {!session && <Link to="/ingresar" className={clasesBoton("contorno")} onClick={() => setAbierto(false)}>Ingresar</Link>}
         </nav>
       )}
+      {session && <MenuCuenta panel={panelCuenta} />}
     </header>
   );
 }

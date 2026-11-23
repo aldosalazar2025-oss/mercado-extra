@@ -1,4 +1,4 @@
-import { Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import LimiteDeErrores from "@/components/LimiteDeErrores";
 import NotificacionesEnVivo from "@/features/notificaciones/NotificacionesEnVivo";
@@ -14,7 +14,6 @@ import AvisoRegistro from "@/components/AvisoRegistro";
 import AuthCallback from "@/features/auth/AuthCallback";
 import { RequiereAdmin, RequiereSesion } from "@/features/auth/Rutas";
 import Registro from "@/features/identidad/Registro";
-import Cuenta from "@/features/identidad/Cuenta";
 import Privacidad from "@/pages/Privacidad";
 import Notificaciones from "@/pages/Notificaciones";
 import ProductoDetalle from "@/pages/ProductoDetalle";
@@ -72,7 +71,7 @@ export default function App() {
           <Route path="/vendedor/solicitudes-recibidas/:requestId/oferta" element={<Panel panel="vendedor" seccion="Solicitudes recibidas" contenido={<OfertaEditor />} />} />
           <Route path="/comprador/mis-solicitudes/:id/editar" element={<Panel panel="comprador" seccion="Mis solicitudes" contenido={<SolicitudEditor />} />} />
           <Route path="/registro" element={<Registro />} />
-          <Route path="/cuenta" element={<Cuenta />} />
+          <Route path="/cuenta" element={<Navigate to="/comprador/mi-perfil" replace />} />
           <Route path="/comprador/:seccion?" element={<Panel panel="comprador" />} />
           <Route path="/vendedor/mis-productos/nuevo" element={<Panel panel="vendedor" seccion="Mis productos" contenido={<ProductoEditor />} />} />
           <Route path="/vendedor/mis-productos/:productoId" element={<Panel panel="vendedor" seccion="Mis productos" contenido={<ProductoEditor />} />} />

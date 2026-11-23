@@ -12,7 +12,7 @@ export default function Ingresar() {
   const ubicacion = useLocation();
 
   useEffect(() => {
-    if (!cargando && session) ir("/cuenta", { replace: true });
+    if (!cargando && session) ir("/comprador/mi-perfil", { replace: true });
   }, [cargando, session, ir]);
 
   async function entrar() {

@@ -2,11 +2,11 @@ export type PanelId = "comprador" | "vendedor" | "admin";
 
 export const paneles: Record<PanelId, { titulo: string; secciones: string[] }> = {
   comprador: {
-    titulo: "Panel del comprador",
+    titulo: "Mis operaciones",
     secciones: ["Inicio", "Mis solicitudes", "Ofertas recibidas", "Mis compras", "Chat", "Reclamos", "Cancelaciones", "Sanciones", "Mis calificaciones", "Mi perfil"],
   },
   vendedor: {
-    titulo: "Panel del vendedor",
+    titulo: "Mis tiendas",
     secciones: ["Resumen", "Mis tiendas", "Mis productos", "Solicitudes recibidas", "Enviar ofertas", "Mis ofertas", "Pedidos", "Chat", "Reclamos", "Cancelaciones", "Sanciones", "Evidencias de entrega", "Empleados y permisos", "Calificaciones", "Estadísticas", "Promociones y planes"],
   },
   admin: {

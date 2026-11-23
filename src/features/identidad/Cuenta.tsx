@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import FotoPerfil from "@/components/FotoPerfil";
 import Boton, { clasesBoton } from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import EditarTelefono from "@/features/comprador/EditarTelefono";
@@ -18,9 +19,10 @@ export default function Cuenta({ enPanel = false }: { enPanel?: boolean }) {
   return (
     <Contenedor className={enPanel ? "max-w-xl space-y-5" : "mx-auto max-w-xl space-y-5 px-4 py-10"}>
       {!enPanel && <h1 className="font-display text-3xl font-extrabold text-pino">Mi cuenta</h1>}
-      <section className="rounded-xl border border-borde bg-white p-4">
+      <section className="flex flex-col items-center gap-1 rounded-xl border border-borde bg-white p-5 text-center">
+        <FotoPerfil className="mb-2 h-16 w-16 text-xl" />
         <p className="font-bold">{perfil?.full_name || "Sin nombre registrado"}</p>
-        <p className="text-suave">{perfil?.email ?? session?.user.email}</p>
+        <p className="max-w-full break-words text-suave">{perfil?.email ?? session?.user.email}</p>
       </section>
 
       {enPanel && perfil && <EditarTelefono key={perfil.id} />}
@@ -49,7 +51,7 @@ export default function Cuenta({ enPanel = false }: { enPanel?: boolean }) {
         <Link to="/vendedor/mis-tiendas" className={clasesBoton("contorno")}>Mis tiendas</Link>
         {perfil?.is_admin && <Link to="/admin" className={clasesBoton("contorno")}>Panel administrativo</Link>}
         <div className="flex max-w-full flex-wrap gap-3">
-          <Link to="/comprador" className={clasesBoton("contorno")}>Panel del comprador</Link>
+          <Link to="/comprador" className={clasesBoton("contorno")}>Mis operaciones</Link>
           <Boton variante="contorno" onClick={() => void cerrarSesion()}>Cerrar sesión</Boton>
         </div>
       </div>}

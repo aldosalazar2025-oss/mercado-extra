@@ -11,7 +11,7 @@ export default function AuthCallback() {
   useEffect(() => {
     if (cargando) return;
     if (!session) ir("/ingresar", { replace: true });
-    else if (verificacion) ir(tomarDestino() ?? "/cuenta", { replace: true });
+    else if (verificacion) ir(tomarDestino() ?? "/comprador/mi-perfil", { replace: true });
     else ir("/registro", { replace: true });
   }, [cargando, session, verificacion, ir]);
 

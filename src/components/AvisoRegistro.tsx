@@ -14,7 +14,7 @@ export default function AvisoRegistro() {
   return (
     <div role="status" className="bg-maiz-suave px-4 py-2 text-center text-sm">
       {texto}{" "}
-      <Link to={verificacion ? "/cuenta" : "/registro"} className="font-bold underline">
+      <Link to={verificacion ? "/comprador/mi-perfil" : "/registro"} className="font-bold underline">
         {verificacion ? "Ver detalles" : "Completar registro"}
       </Link>
     </div>

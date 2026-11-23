@@ -27,7 +27,7 @@ export default function Registro() {
     return (
       <main className="mx-auto max-w-xl space-y-3 px-4 py-14 text-center">
         <h1 className="font-display text-2xl font-extrabold text-pino">Tu registro ya fue enviado</h1>
-        <Link to="/cuenta" className="font-bold text-mercado underline">Ver el estado de mi verificación</Link>
+        <Link to="/comprador/mi-perfil" className="font-bold text-mercado underline">Ver el estado de mi verificación</Link>
       </main>
     );
   }
@@ -87,7 +87,7 @@ export default function Registro() {
         .update({ full_name: nombre.trim(), phone: telefono.trim() || null, consent_accepted_at: new Date().toISOString() })
         .eq("id", uid);
       await recargar();
-      ir(tomarDestino() ?? "/cuenta", { replace: true });
+      ir(tomarDestino() ?? "/comprador/mi-perfil", { replace: true });
     } catch (err) {
       setErrorGeneral(err instanceof Error ? err.message : "Ocurrió un error. Inténtalo de nuevo.");
     } finally {
