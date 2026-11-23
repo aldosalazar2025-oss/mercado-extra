@@ -150,7 +150,7 @@ const select: Record<Clase, string> = {
   sancion: "id,user_id,type,reason,ends_at,source_type,source_id,appeal_text,appeal_status,created_at",
 };
 
-export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas }: { clase: Clase; rol: Rol; pedido?: string; tiendas?: string[] }) {
+export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigentes = false }: { clase: Clase; rol: Rol; pedido?: string; tiendas?: string[]; soloVigentes?: boolean }) {
   const uid = useUid();
   const tiendas = useQuery({
     queryKey: ["casos", uid, "tiendas-pedidos"],
@@ -162,13 +162,18 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas }: { clase:
     },
   });
   const consulta = useQuery({
-    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas],
+    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas, soloVigentes],
     enabled: Boolean(uid && supabase),
     queryFn: async () => {
       const base = supabase!.from(tablaCasos(clase)).select(select[clase]);
       if (pedido) base.eq("order_id", pedido);
       if (clase === "reclamo" && idsTiendas) base.in("store_id", idsTiendas);
       if (clase === "sancion" && rol !== "admin") base.eq("user_id", uid);
+      if (clase === "sancion" && soloVigentes) {
+        const ahora = new Date().toISOString();
+        base.in("type", ["bloqueo", "suspension_temporal"]).lte("starts_at", ahora)
+          .or(`ends_at.is.null,ends_at.gt.${ahora}`).or("appeal_status.is.null,appeal_status.neq.aceptada");
+      }
       const { data, error } = await base.order("created_at", { ascending: false });
       if (error) throw error;
       return data as unknown as (Reclamo | Cancelacion | Sancion)[];

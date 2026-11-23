@@ -1276,6 +1276,27 @@ select t.ok((select pedidos_periodo = 0 and completados = 0 and importe_acordado
   from public.panel_vendedor(90) where tienda_id = t.u(101)), 'los pedidos antiguos quedan fuera del periodo seleccionado');
 select t.ok((select pedidos_periodo > 0 from public.panel_vendedor() where tienda_id = t.u(101)), 'todo el historial incluye pedidos antiguos');
 
+-- Etapa 15. Restricciones de cuenta y apelaciones.
+select t.como(t.u(7));
+select public.admin_estado_usuario(t.u(2), 'bloqueado', 'Bloqueo QA para comprobar la apelación');
+select t.como(t.u(2));
+select t.ok(not public.cuenta_activa(), 'una cuenta bloqueada queda inactiva');
+select t.ok(t.falla(format('update public.profiles set phone = %L where id = %L', '999123456', t.u(2))),
+  'una cuenta bloqueada no puede editar su perfil');
+select public.apelar_sancion(id, 'Apelación QA de una cuenta bloqueada')
+  from public.sanctions where user_id = t.u(2) and ends_at is null and source_id = t.u(2);
+select t.como(t.u(7));
+select public.revisar_apelacion(id, true)
+  from public.sanctions where user_id = t.u(2) and appeal_status = 'pendiente';
+select t.como(t.u(2));
+select t.ok(public.cuenta_activa() and (select status = 'activo' from public.profiles where id = t.u(2)),
+  'la apelación aceptada reactiva el perfil');
+select t.como(t.u(7));
+select public.admin_estado_usuario(t.u(2), 'suspendido', 'Suspensión QA para comprobar la reactivación manual');
+select public.admin_estado_usuario(t.u(2), 'activo', 'Reactivación manual de una cuenta suspendida');
+select t.como(t.u(2));
+select t.ok(public.cuenta_activa(), 'el administrador puede habilitar una cuenta suspendida');
+
 -- 13. Estructura y catálogos
 select t.root();
 select t.ok(not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace

@@ -43,7 +43,7 @@ const fichas: Record<string, Ficha> = {
     titulo: (f) => texto(f, "full_name") || texto(f, "email") || "Usuario sin nombre",
     detalle: (f) => <>
       <p className="break-words text-sm">{texto(f, "email")} · {f.is_admin ? "Administración" : f.is_seller ? "Vendedor" : "Comprador"}</p>
-      {!f.is_admin && <FormularioCaso titulo="Cambiar estado de la cuenta" opciones={estadoCuenta.filter(([id]) => id !== f.status)} confirmar
+      {!f.is_admin && <FormularioCaso key={String(f.status)} titulo="Cambiar estado de la cuenta" opciones={estadoCuenta.filter(([id]) => id !== f.status)} confirmar
         ejecutar={(motivo, estado) => accion("admin_estado_usuario", { p_id: f.id, p_estado: estado, p_motivo: motivo })} />}
     </>,
   },
