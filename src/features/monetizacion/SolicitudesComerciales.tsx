@@ -7,6 +7,14 @@ import { estadoComercial, useSolicitudesComerciales, type Promocion, type Solici
 
 type Props = { tipo: "plan" | "promocion"; admin?: boolean; tienda?: string };
 
+const colorPromocion: Record<string, string> = {
+  pendiente: "text-amber-800",
+  activa: "text-emerald-800",
+  rechazada: "text-error",
+  pausada: "text-slate-600",
+  vencida: "text-slate-600",
+};
+
 function FilaComercial({ tipo, fila, admin }: { tipo: Props["tipo"]; fila: Promocion | SolicitudPlan; admin: boolean }) {
   const estado = estadoComercial(fila);
   const plan = "subscription_plans" in fila ? fila : null;
@@ -20,7 +28,9 @@ function FilaComercial({ tipo, fila, admin }: { tipo: Props["tipo"]; fila: Promo
     <li className="space-y-2 rounded-xl border border-borde bg-white p-4">
       <h3 className="font-display text-lg font-bold">{plan ? plan.subscription_plans?.name ?? "Plan comercial" : promo?.products?.name ?? "Tienda destacada"}</h3>
       {admin && <p className="text-sm text-suave">{fila.stores?.name ?? "Tienda"}</p>}
-      <p className="text-sm capitalize text-suave">{estado}{activa && fila.ends_at ? ` · Hasta ${new Date(fila.ends_at).toLocaleDateString("es-PE")}` : ""}</p>
+      <p className="text-sm capitalize text-suave">
+        <span className={admin && tipo === "promocion" ? `font-bold ${colorPromocion[estado] ?? "text-slate-600"}` : ""}>{estado}</span>
+        {activa && fila.ends_at ? ` · Hasta ${new Date(fila.ends_at).toLocaleDateString("es-PE")}` : ""}</p>
       {plan?.precio_acordado != null && <p className="text-sm">{soles(Number(plan.precio_acordado))} por un mes</p>}
       {promo && <p className="text-sm">Duración · {promo.dias} días</p>}
       {fila.decision && <p className="whitespace-pre-wrap break-words text-sm">{fila.decision}</p>}

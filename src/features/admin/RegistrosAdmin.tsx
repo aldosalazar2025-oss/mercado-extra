@@ -26,8 +26,58 @@ const texto = (f: Registro, campo: string) => typeof f[campo] === "string" ? Str
 const etiqueta = (valor: unknown) => String(valor ?? "").replace(/_/g, " ");
 const fecha = (valor: string) => new Date(valor).toLocaleString("es-PE");
 
+const colorEstado: Record<string, string> = {
+  atendida: "text-emerald-800",
+  aceptada: "text-emerald-800",
+  oferta_aceptada: "text-emerald-800",
+  entregado: "text-emerald-800",
+  completada: "text-emerald-800",
+  abierta: "text-amber-800",
+  enviada: "text-amber-800",
+  pendiente_confirmacion: "text-amber-800",
+  con_ofertas: "text-blue-800",
+  compra_coordinada: "text-blue-800",
+  en_preparacion: "text-blue-800",
+  evidencias_registradas: "text-blue-800",
+  enviado_o_listo: "text-blue-800",
+  cancelada: "text-error",
+  rechazada: "text-error",
+};
+
 function Referencia({ seccion, id, nombre, comoBoton = false }: { seccion: string; id: string; nombre: string; comoBoton?: boolean }) {
   return <Link className={comoBoton ? clasesBoton("contorno") : "font-bold text-mercado underline"} to={`/admin/${seccion}?id=${id}`}>{nombre}</Link>;
+}
+
+type OfertaDetalle = { price?: number; description: string | null; delivery_terms: string | null; eta: string | null };
+
+function DatosFicha({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <details className="space-y-2 rounded-lg border border-borde p-3">
+      <summary className="cursor-pointer font-bold text-mercado">{titulo}</summary>
+      <dl className="grid gap-3 rounded-lg bg-hoja/40 p-3 text-sm sm:grid-cols-2">{children}</dl>
+    </details>
+  );
+}
+
+function Dato({ rotulo, children, anchoCompleto = false }: { rotulo: string; children: ReactNode; anchoCompleto?: boolean }) {
+  return (
+    <div className={anchoCompleto ? "sm:col-span-2" : undefined}>
+      <dt className="font-bold text-pino">{rotulo}</dt>
+      <dd className="whitespace-pre-wrap break-words">{children}</dd>
+    </div>
+  );
+}
+
+function DetalleOferta({ version }: { version: OfertaDetalle | null }) {
+  return <>
+    {version?.description && <Dato rotulo="Descripción de la oferta de la tienda" anchoCompleto>{version.description}</Dato>}
+    {version?.delivery_terms && <Dato rotulo="Condiciones de entrega ofrecidas">{version.delivery_terms}</Dato>}
+    {version?.eta && <Dato rotulo="Tiempo de entrega ofrecido">{version.eta}</Dato>}
+  </>;
+}
+
+function nombreComprador(fila: Registro) {
+  return (fila.comprador as { full_name: string } | null)?.full_name || "Nombre no disponible";
 }
 
 const estadoCuenta = [
@@ -49,38 +99,55 @@ const fichas: Record<string, Ficha> = {
   },
   Solicitudes: {
     tabla: "requests",
-    columnas: "id,title,description,status,max_budget,buyer_id,created_at",
+    columnas: "id,title,description,status,max_budget,budget_negotiable,buyer_id,created_at,comprador:profiles!requests_buyer_id_fkey(full_name)",
     buscar: { etiqueta: "Título de la solicitud", campo: () => "title" },
     estados: ["abierta", "con_ofertas", "atendida", "vencida", "cancelada", "eliminada"],
     titulo: (f) => texto(f, "title"),
     detalle: (f) => <>
-      <p>Presupuesto máximo · {soles(Number(f.max_budget))}</p>
-      {f.description && <p className="whitespace-pre-wrap break-words">{texto(f, "description")}</p>}
+      <DatosFicha titulo="Consultar solicitud">
+        <Dato rotulo="Solicitud del comprador">{texto(f, "title")}</Dato>
+        <Dato rotulo="Publicada por">{nombreComprador(f)}</Dato>
+        <Dato rotulo="Presupuesto máximo del comprador">{soles(Number(f.max_budget))}</Dato>
+        <Dato rotulo="Presupuesto negociable">{f.budget_negotiable ? "Sí" : "No"}</Dato>
+        {texto(f, "description") && <Dato rotulo="Descripción de la solicitud" anchoCompleto>{texto(f, "description")}</Dato>}
+      </DatosFicha>
       <Referencia seccion="usuarios" id={texto(f, "buyer_id")} nombre="Ver comprador" comoBoton />
     </>,
   },
   Ofertas: {
     tabla: "offers",
-    columnas: "id,request_id,store_id,status,created_at,stores(name),version:offer_history!offers_current_version_fk(price,description,delivery_terms)",
+    columnas: "id,request_id,status,created_at,stores(name),solicitud:requests!offers_request_id_fkey(title),version:offer_history!offers_current_version_fk(price,description,delivery_terms,eta)",
     estados: ["enviada", "aceptada", "rechazada", "reemplazada", "retirada"],
     titulo: (f) => (f.stores as { name: string } | null)?.name ?? "Oferta",
     detalle: (f) => {
-      const version = f.version as { price: number; description: string | null; delivery_terms: string | null } | null;
+      const version = f.version as OfertaDetalle | null;
       return <>
-        {version && <p>{soles(Number(version.price))}</p>}
-        {version?.description && <p className="whitespace-pre-wrap break-words">{version.description}</p>}
-        {version?.delivery_terms && <p className="whitespace-pre-wrap break-words">{version.delivery_terms}</p>}
+        <DatosFicha titulo="Consultar oferta">
+          <Dato rotulo="Solicitud del comprador">{(f.solicitud as { title: string } | null)?.title ?? "Solicitud sin título disponible"}</Dato>
+          <Dato rotulo="Tienda que hizo la oferta">{(f.stores as { name: string } | null)?.name ?? "Tienda sin nombre disponible"}</Dato>
+          <Dato rotulo="Precio ofrecido por la tienda">{version ? soles(Number(version.price)) : "Sin precio disponible"}</Dato>
+          <DetalleOferta version={version} />
+        </DatosFicha>
         <Referencia seccion="solicitudes" id={texto(f, "request_id")} nombre="Ver solicitud" comoBoton />
       </>;
     },
   },
   Operaciones: {
     tabla: "orders",
-    columnas: "id,request_id,buyer_id,status,agreed_price,delivery_mode,created_at,requests(title),stores(name)",
+    columnas: "id,request_id,buyer_id,status,agreed_price,delivery_mode,created_at,requests(title),stores(name),comprador:profiles!orders_buyer_id_fkey(full_name),version:offer_history!orders_offer_version_id_fkey(description,delivery_terms,eta)",
     estados: ["oferta_aceptada", "compra_coordinada", "en_preparacion", "evidencias_registradas", "enviado_o_listo", "pendiente_confirmacion", "entregado", "completada", "cancelada"],
     titulo: (f) => (f.requests as { title: string } | null)?.title ?? "Pedido",
     detalle: (f) => <>
-      <p>{(f.stores as { name: string } | null)?.name ?? "Tienda"} · {soles(Number(f.agreed_price))} · {texto(f, "delivery_mode") === "recojo" ? "Recojo" : "Domicilio"}</p>
+      <DatosFicha titulo="Consultar pedido y oferta">
+        <Dato rotulo="Solicitud del comprador">{(f.requests as { title: string } | null)?.title ?? "Solicitud sin título disponible"}</Dato>
+        <Dato rotulo="Comprador">{nombreComprador(f)}</Dato>
+        <Dato rotulo="Tienda del pedido">{(f.stores as { name: string } | null)?.name ?? "Tienda sin nombre disponible"}</Dato>
+        <Dato rotulo="Precio acordado del pedido">{soles(Number(f.agreed_price))}</Dato>
+        <Dato rotulo="Modalidad de entrega acordada">
+          {texto(f, "delivery_mode") === "recojo" ? "Recojo en tienda" : "Entrega a domicilio"}
+        </Dato>
+        <DetalleOferta version={f.version as OfertaDetalle | null} />
+      </DatosFicha>
       <div className="flex flex-wrap gap-3">
         <Referencia seccion="solicitudes" id={texto(f, "request_id")} nombre="Ver solicitud" comoBoton />
         <Referencia seccion="usuarios" id={texto(f, "buyer_id")} nombre="Ver comprador" comoBoton />
@@ -128,6 +195,7 @@ const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 
 export default function RegistrosAdmin({ seccion }: { seccion: string }) {
   const ficha = fichas[seccion];
+  const resaltaEstado = ["Solicitudes", "Ofertas", "Operaciones"].includes(seccion);
   const { session } = useAuth();
   const [parametros, setParametros] = useSearchParams();
   const id = parametros.get("id") ?? "";
@@ -186,7 +254,15 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
       <ul className="space-y-3">
         {consulta.data?.filas.map((f) => <li key={f.id} className="space-y-2 rounded-xl border border-borde bg-white p-4">
           <h2 className="break-words font-display text-lg font-bold text-pino">{ficha.titulo(f)}</h2>
-          <p className="text-sm text-suave capitalize">{f.status ? `${etiqueta(f.status)} · ` : ""}{fecha(f.created_at)}</p>
+          <p className="text-sm text-suave">
+            {f.status ? <>
+              <span className={resaltaEstado ? `font-bold capitalize ${colorEstado[String(f.status)] ?? "text-slate-600"}` : "capitalize"}>
+                {etiqueta(f.status)}
+              </span>
+              {" · "}
+            </> : null}
+            {fecha(f.created_at)}
+          </p>
           {ficha.detalle(f)}
           <p className="break-all text-xs text-suave">ID {f.id}</p>
         </li>)}

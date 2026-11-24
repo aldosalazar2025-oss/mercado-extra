@@ -7,6 +7,7 @@ import TarjetaTienda, { type TiendaCard } from "@/components/TarjetaTienda";
 import type { MedallaPlan } from "@/features/monetizacion/datos";
 import type { ProductoCatalogo } from "@/features/catalogo/tipos";
 import { supabase } from "@/lib/supabase";
+import AvisosSanciones from "@/features/reclamos/AvisosSanciones";
 
 const pasos = [
   { t: "Publicas lo que necesitas", d: "Describe el producto, sube fotos de referencia y fija tu presupuesto máximo." },
@@ -31,6 +32,7 @@ export default function Inicio() {
   });
   return (
     <>
+      <div className="mx-auto max-w-6xl px-4 py-3 empty:hidden"><AvisosSanciones /></div>
       <section className="bg-pino text-white">
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-12 md:grid-cols-2 md:py-16">
           <div className="space-y-5">

@@ -24,6 +24,7 @@ import AdminTiendas from "@/features/tiendas/AdminTiendas";
 import MisTiendas from "@/features/tiendas/MisTiendas";
 import { useMisPermisos } from "@/features/tiendas/hooks";
 import { paneles, permisoSeccion, slug, type PanelId } from "./config";
+import AvisosSanciones from "@/features/reclamos/AvisosSanciones";
 
 function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
   if (panel === "vendedor" && seccion === "Resumen") return <ResumenVendedor />;
@@ -109,6 +110,8 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
 
       <main className="min-w-0 space-y-4">
         <h1 className="font-display text-3xl font-extrabold text-pino">{actual}</h1>
+        {panel === "vendedor" && actual === "Resumen" && <AvisosSanciones destino="tienda" />}
+        {panel === "comprador" && actual === "Inicio" && <AvisosSanciones destino="usuario" />}
         {real}
         <p className="text-sm">
           <Link to="/" className="font-bold text-mercado underline">Volver al inicio</Link>
