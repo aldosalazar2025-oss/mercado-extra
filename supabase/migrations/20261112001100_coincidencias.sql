@@ -103,9 +103,11 @@ begin
     where rm.request_id = p_request and rm.notified_at is null and not rm.dismissed
   loop
     -- tope diario por tienda: si lo supera, la solicitud igual aparece en "Solicitudes recibidas", sin aviso
-    if (select count(*) from public.notifications n
+    if ((select count(*) from public.notifications n
         where n.type = 'solicitud_nueva' and n.payload ->> 'store_id' = m.store_id::text
-          and n.created_at > now() - interval '24 hours') >= 30 then
+          and n.created_at > now() - interval '24 hours')
+      + (select coalesce(sum(t.cantidad), 0) from public.notificaciones_tope_borradas t
+        where t.tienda = m.store_id::text and t.emitida_en > now() - interval '24 hours')) >= 30 then
       continue;
     end if;
 
@@ -191,6 +193,44 @@ create policy matches_descartar on public.request_matches for update to authenti
 
 -- 6) Índice para el tope diario de avisos y publicación en tiempo real de las notificaciones.
 create index idx_notifications_tope on public.notifications ((payload ->> 'store_id'), created_at) where type = 'solicitud_nueva';
+
+-- Conserva solo el conteo de entregas recientes necesario para aplicar el tope de avisos.
+create table if not exists public.notificaciones_tope_borradas (
+  tienda text not null,
+  emitida_en timestamptz not null,
+  cantidad integer not null check (cantidad > 0),
+  primary key (tienda, emitida_en)
+);
+alter table public.notificaciones_tope_borradas enable row level security;
+revoke all on public.notificaciones_tope_borradas from public, anon, authenticated;
+create index if not exists notificaciones_tope_borradas_fecha_idx on public.notificaciones_tope_borradas (emitida_en);
+
+create or replace function public.vaciar_mis_notificaciones()
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  destinatario uuid := auth.uid();
+  cantidad integer;
+begin
+  if destinatario is null or not public.cuenta_activa() then
+    raise exception 'Se requiere una cuenta activa.' using errcode = '42501';
+  end if;
+  delete from public.notificaciones_tope_borradas where emitida_en <= now() - interval '24 hours';
+  with borradas as (
+    delete from public.notifications where user_id = destinatario
+    returning type, payload, created_at
+  ), conteos as (
+    insert into public.notificaciones_tope_borradas as t (tienda, emitida_en, cantidad)
+    select payload->>'store_id', created_at, count(*)::integer from borradas
+    where type = 'solicitud_nueva' and payload->>'store_id' is not null and created_at > now() - interval '24 hours'
+    group by payload->>'store_id', created_at
+    on conflict (tienda, emitida_en) do update set cantidad = t.cantidad + excluded.cantidad
+  )
+  select count(*)::integer into cantidad from borradas;
+  return cantidad;
+end $$;
+
+revoke execute on function public.vaciar_mis_notificaciones() from public, anon;
+grant execute on function public.vaciar_mis_notificaciones() to authenticated;
 
 do $$
 begin

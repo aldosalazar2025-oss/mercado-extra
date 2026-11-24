@@ -1,3 +1,4 @@
+import EstrellasCalificacion from "./EstrellasCalificacion";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
@@ -35,6 +36,8 @@ export default function CalificarPedido({ p, uid }: { p: Pedido; uid: string }) 
       await Promise.all([
         cliente.invalidateQueries({ queryKey: ["calificaciones", uid] }),
         cliente.invalidateQueries({ queryKey: ["reputacion-tienda", p.store_id] }),
+        cliente.invalidateQueries({ queryKey: ["resenas-publicas-tienda", p.store_id] }),
+        cliente.invalidateQueries({ queryKey: ["reputacion-comprador", p.buyer_id] }),
         cliente.invalidateQueries({ queryKey: ["ofertas-solicitud", p.request_id] }),
       ]);
     },
@@ -48,7 +51,7 @@ export default function CalificarPedido({ p, uid }: { p: Pedido; uid: string }) 
       {previa.isPending && <p className="text-sm text-suave">Consultando la calificación…</p>}
       {previa.isError && <p role="alert" className="text-error">No se pudo consultar la calificación.</p>}
       {previa.data && <>
-        <p className="font-bold">Calificación enviada · {previa.data.score} de 5</p>
+        <p className="flex flex-wrap items-center gap-2 font-bold">Calificación enviada <EstrellasCalificacion puntuacion={previa.data.score} /></p>
         {previa.data.comment && <p className="whitespace-pre-wrap break-words">{previa.data.comment}</p>}
       </>}
       {previa.isSuccess && !previa.data && (

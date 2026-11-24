@@ -1,3 +1,7 @@
+import CierrePedido, { type ControlCierre } from "@/features/pedidos/CierrePedido";
+import type { EstadoPedido } from "@/features/pedidos/tipos";
+import TachoBaja from "./TachoBaja";
+import PromedioListado, { usePromediosListado } from "./PromedioListado";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -90,6 +94,8 @@ const registrosAuditados: Record<string, string> = {
 };
 
 const cambiosAuditados: Record<string, string> = {
+  dar_baja_usuario: "Dio de baja la cuenta",
+  dar_baja_tienda: "Dio de baja la tienda",
   activar: "Activó la solicitud",
   rechazar: "Rechazó la solicitud",
   pausar: "Pausó la promoción",
@@ -116,7 +122,7 @@ const estadoCuenta = [
 const fichas: Record<string, Ficha> = {
   Usuarios: {
     tabla: "profiles",
-    columnas: "id,full_name,email,status,is_seller,is_admin,created_at,verificacion:identity_verifications!identity_verifications_user_id_fkey(status)",
+    columnas: "id,full_name,email,status,is_seller,is_admin,created_at,admin_baja_at,verificacion:identity_verifications!identity_verifications_user_id_fkey(status,dni)",
     buscar: { etiqueta: "Nombre o correo", campo: (valor) => valor.includes("@") ? "email" : "full_name" },
     estados: estadoCuenta.map(([id]) => id),
     titulo: (f) => texto(f, "full_name") || texto(f, "email") || "Usuario sin nombre",
@@ -127,8 +133,8 @@ const fichas: Record<string, Ficha> = {
         opciones.push(["suplantacion", "Bloquear por suplantación"]);
       }
       return <>
-        <p className="break-words text-sm">{texto(f, "email")} · {f.is_admin ? "Administración" : f.is_seller ? "Vendedor" : "Comprador"}</p>
-        {!f.is_admin && <FormularioCaso key={`${f.status}-${verificacion ?? ""}`} titulo="Cambiar estado de la cuenta" opciones={opciones} confirmar
+        {!f.is_admin && !f.admin_baja_at && <FormularioCaso key={`${f.status}-${verificacion ?? ""}`} titulo="Cambiar estado de la cuenta" opciones={opciones}
+          confirmar
           ejecutar={(motivo, estado) => estado === "suplantacion"
             ? accion("admin_bloquear_suplantacion", { p_id: f.id, p_motivo: motivo })
             : accion("admin_estado_usuario", { p_id: f.id, p_estado: estado, p_motivo: motivo })} />}
@@ -172,10 +178,11 @@ const fichas: Record<string, Ficha> = {
   },
   Operaciones: {
     tabla: "orders",
-    columnas: "id,request_id,buyer_id,status,agreed_price,delivery_mode,created_at,requests(title),stores(name),comprador:profiles!orders_buyer_id_fkey(full_name),version:offer_history!orders_offer_version_id_fkey(description,delivery_terms,eta)",
+    columnas: "id,request_id,buyer_id,status,agreed_price,delivery_mode,created_at,requests(title),stores(name),comprador:profiles!orders_buyer_id_fkey(full_name),version:offer_history!orders_offer_version_id_fkey(description,delivery_terms,eta),control:order_close_control(*)",
     estados: ["oferta_aceptada", "compra_coordinada", "en_preparacion", "evidencias_registradas", "enviado_o_listo", "pendiente_confirmacion", "entregado", "completada", "cancelada"],
     titulo: (f) => (f.requests as { title: string } | null)?.title ?? "Pedido",
     detalle: (f) => <>
+      <CierrePedido id={String(f.id)} uid="" rol="admin" estado={f.status as EstadoPedido} control={(f.control as ControlCierre | null) ?? null} />
       <DatosFicha titulo="Consultar pedido y oferta">
         <Dato rotulo="Solicitud del comprador">{(f.requests as { title: string } | null)?.title ?? "Solicitud sin título disponible"}</Dato>
         <Dato rotulo="Comprador">{nombreComprador(f)}</Dato>
@@ -253,7 +260,7 @@ const fichas: Record<string, Ficha> = {
 const tamano = 20;
 const estadosEliminables: Record<string, readonly string[]> = {
   requests: ["atendida", "vencida", "cancelada", "eliminada"],
-  offers: ["rechazada", "reemplazada", "retirada"],
+  offers: ["aceptada", "rechazada", "reemplazada", "retirada"],
   orders: ["completada", "cancelada"],
   rating_reports: ["aceptada", "rechazada"],
 };
@@ -281,6 +288,7 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
       if (!supabase) throw new Error("Sin conexión");
       const base = supabase.from(ficha.tabla).select(ficha.columnas);
       if (id) base.eq("id", id);
+      if (!id && ficha.tabla === "profiles") base.is("admin_baja_at", null);
       if (eliminables && !id) base.is("admin_archived_at", null);
       if (estado && !id) base.eq("status", estado);
       if (auditoria && entidad && !id) base.in("entity", Object.keys(registrosAuditados).filter((clave) => registrosAuditados[clave] === entidad));
@@ -306,6 +314,9 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
       return { filas, siguiente: registros.length > tamano };
     },
   });
+
+  const promedios = usePromediosListado("usuarios", seccion === "Usuarios"
+    ? (consulta.data?.filas ?? []).map((fila) => String(fila.id)) : []);
 
   function buscar(e: FormEvent) {
     e.preventDefault();
@@ -353,6 +364,31 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
       {consulta.isLoading && <p className="text-suave">Cargando registros…</p>}
       {consulta.isError && <p role="alert" className="text-error">No se pudieron cargar los registros.</p>}
       {consulta.isSuccess && consulta.data.filas.length === 0 && <p className="rounded-xl bg-white p-4 text-suave">No hay registros para esta consulta.</p>}
+      {seccion === "Usuarios" ? (
+        <ul className="divide-y divide-borde overflow-hidden rounded-xl border border-borde bg-white">
+          {consulta.data?.filas.map((f) => (
+            <li key={f.id} className="space-y-3 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="min-w-0 break-words font-display text-lg font-bold text-pino">{ficha.titulo(f)}</h2>
+                {!f.is_admin && !f.admin_baja_at && <TachoBaja id={String(f.id)} tipo="usuario"
+                  nombre={texto(f, "full_name") || texto(f, "email") || "este usuario"} />}
+              </div>
+              <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                <Dato rotulo="DNI">{(f.verificacion as { dni?: string } | null)?.dni || "Sin registro"}</Dato>
+                <Dato rotulo="Correo">{texto(f, "email") || "Sin correo"}</Dato>
+                <Dato rotulo="Estado y rol">
+                  <span className={`font-semibold ${f.status === "activo" ? "text-emerald-800" : f.status === "suspendido" ? "text-amber-800" : "text-error"}`}>
+                    {f.admin_baja_at ? "Dada de baja" : estadoCuenta.find(([clave]) => clave === f.status)?.[1] ?? etiqueta(f.status)}
+                  </span>
+                  <span className="text-suave"> · {f.is_admin ? "Administración" : f.is_seller ? "Vendedor" : "Comprador"}</span>
+                </Dato>
+                <Dato rotulo="Reputación como comprador"><PromedioListado id={String(f.id)} consulta={promedios} /></Dato>
+              </dl>
+              {ficha.detalle(f)}
+            </li>
+          ))}
+        </ul>
+      ) : (
       <ul className={reputacion || auditoria ? "grid items-start gap-3 lg:grid-cols-2" : "space-y-3"}>
         {consulta.data?.filas.map((f) => <li key={f.id} className="space-y-2 rounded-xl border border-borde bg-white p-4">
           <div className="flex items-start justify-between gap-2">
@@ -374,6 +410,7 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
           <p className="break-all text-xs text-suave">ID {f.id}</p>
         </li>)}
       </ul>
+      )}
       {!id && (pagina > 0 || consulta.data?.siguiente) && <nav aria-label="Páginas de resultados" className="flex flex-wrap items-center gap-2">
         <Boton variante="contorno" disabled={pagina === 0} onClick={() => setPagina(pagina - 1)}>Anterior</Boton>
         <span className="text-sm">Página {pagina + 1}</span>

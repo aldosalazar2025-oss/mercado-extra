@@ -55,6 +55,17 @@ export default function Notificaciones() {
     onSuccess: refrescar,
   });
 
+  const vaciar = useMutation({
+    mutationFn: async () => {
+      if (!supabase || !session) throw new Error("No hay una sesión activa.");
+      const { error: errorBorrado } = await supabase.rpc("vaciar_mis_notificaciones");
+      if (errorBorrado) throw errorBorrado;
+    },
+    onSuccess: async () => {
+      await cliente.invalidateQueries({ queryKey: ["notificaciones"] });
+    },
+  });
+
   function abrir(n: Notificacion) {
     if (!n.read_at) marcar.mutate(n.id);
     const ruta = rutaDe(n);
@@ -67,8 +78,23 @@ export default function Notificaciones() {
     <main className="mx-auto max-w-2xl space-y-4 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-3xl font-extrabold text-pino">Notificaciones</h1>
-        {sinLeer > 0 && <Boton variante="contorno" onClick={() => marcar.mutate(null)} disabled={marcar.isPending}>Marcar todas como leídas</Boton>}
+        <div className="flex flex-wrap items-center gap-2">
+          {sinLeer > 0 && <Boton variante="contorno" onClick={() => marcar.mutate(null)} disabled={marcar.isPending || vaciar.isPending}>Marcar todas como leídas</Boton>}
+          {Boolean(data?.length) && <button type="button" aria-label="Vaciar notificaciones" title="Vaciar notificaciones"
+            className="inline-flex size-11 items-center justify-center rounded-lg text-error hover:bg-red-50 focus-visible:outline-2 disabled:opacity-40"
+            disabled={vaciar.isPending || marcar.isPending}
+            onClick={() => {
+              if (confirm("¿Eliminar definitivamente todas las notificaciones de tu buzón? Esta acción no se puede deshacer.")) vaciar.mutate();
+            }}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75"
+              strokeLinecap="round" strokeLinejoin="round" className="size-5">
+              <path d="M3 6h18M9 6V4h6v2m4 0-1 14H6L5 6m5 4v6m4-6v6" />
+            </svg>
+          </button>}
+        </div>
       </div>
+      {vaciar.isPending && <p role="status" className="text-sm text-suave">Vaciando notificaciones…</p>}
+      {vaciar.isError && <p role="alert" className="text-error">No se pudo vaciar tu buzón. Inténtalo de nuevo.</p>}
       {isLoading && <p className="text-suave">Cargando…</p>}
       {error && <p role="alert" className="text-error">No se pudieron cargar tus notificaciones.</p>}
       {data?.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">No tienes notificaciones todavía. Te avisaremos cuando haya novedades.</p>}

@@ -1,4 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/features/auth/AuthContext";
 import { Link, useSearchParams } from "react-router-dom";
+import type { ReactNode } from "react";
+import { AccionHistorial, SeleccionHistorial, useHistorialPersonal } from "@/features/comprador/HistorialPersonal";
 import { clasesBoton } from "@/components/Boton";
 import { soles } from "@/lib/format";
 import SelectorTiendaVendedor from "@/features/vendedor/SelectorTiendaVendedor";
@@ -8,7 +13,7 @@ import { etiquetaEstado, rutaPedido, type Pedido } from "./tipos";
 
 type Rol = "comprador" | "vendedor";
 
-function Tarjeta({ p, rol }: { p: Pedido; rol: Rol }) {
+function Tarjeta({ p, rol, accion }: { p: Pedido; rol: Rol; accion?: ReactNode }) {
   const otro = rol === "comprador" ? p.tienda : p.comprador || "Comprador";
   const color = p.estado === "completada" || p.estado === "entregado" ? "bg-hoja text-pino" : p.estado === "cancelada" ? "bg-borde text-suave" : "bg-maiz-suave text-tinta";
   const necesitaFotos = rol === "vendedor" && p.modo === "domicilio" && (p.estado === "compra_coordinada" || p.estado === "en_preparacion");
@@ -19,9 +24,12 @@ function Tarjeta({ p, rol }: { p: Pedido; rol: Rol }) {
           <p className="font-display text-lg font-bold">{p.solicitud}</p>
           <p className="text-sm text-suave">{rol === "comprador" ? "Tienda" : "Comprador"}: {otro} · {p.modo === "domicilio" ? "Entrega a domicilio" : "Recojo en tienda"}</p>
         </div>
+        <div className="flex items-start gap-2">
         <div className="space-y-1 text-right">
           <p className="text-xl font-extrabold text-pino">{soles(p.precio)}</p>
           <span className={`inline-block rounded-full px-3 py-0.5 text-sm font-bold ${color}`}>{etiquetaEstado(p.estado, p.modo)}</span>
+        </div>
+        {accion}
         </div>
       </div>
       {necesitaFotos && <p className="text-sm font-semibold">Fotos obligatorias: {p.fotos_obligatorias} de 4</p>}
@@ -44,8 +52,31 @@ export default function ListaPedidos({ rol, soloEvidencias = false }: { rol: Rol
     if (estadoCompra === "completada" || estadoCompra === "cancelada") return p.estado === estadoCompra;
     return true;
   };
-  const lista = (data ?? []).filter((p) => p.mi_rol === rol && coincideEstado(p) && (!filtroTienda || p.store_id === filtroTienda)
+  const { session } = useAuth();
+  const seccion = rol === "comprador" ? "compras" : "pedidos_tienda";
+  const historial = useHistorialPersonal(seccion, !soloEvidencias);
+  const propios = (data ?? []).filter((p) => p.mi_rol === rol && coincideEstado(p) && (!filtroTienda || p.store_id === filtroTienda)
     && (!soloEvidencias || p.estado === "compra_coordinada" || p.estado === "en_preparacion"));
+  const ids = propios.map((p) => p.order_id);
+  const ocultables = useQuery({
+    queryKey: ["casos", "pedidos-ocultables", session?.user.id, seccion, ids],
+    enabled: Boolean(!soloEvidencias && ids.length && session && supabase),
+    refetchInterval: 15000,
+    queryFn: async () => {
+      const resultado = new Set<string>();
+      for (let inicio = 0; inicio < ids.length; inicio += 500) {
+        const { data, error } = await supabase!.rpc("pedidos_ocultables", {
+          p_seccion: seccion, p_ids: ids.slice(inicio, inicio + 500),
+        });
+        if (error) throw error;
+        (data as string[]).forEach((id) => resultado.add(id));
+      }
+      return resultado;
+    },
+  });
+  const sePuedeQuitar = (p: Pedido) => ocultables.isSuccess && ocultables.data.has(p.order_id);
+  const lista = propios.filter((p) =>
+    historial.visible(p.order_id) || (ocultables.isSuccess && !ocultables.data.has(p.order_id)));
   return (
     <div className="space-y-4">
       {rol === "comprador" && <label className="block max-w-xs font-bold">Estado de la compra
@@ -67,7 +98,10 @@ export default function ListaPedidos({ rol, soloEvidencias = false }: { rol: Rol
           {estadoCompra ? "No hay compras con ese estado." : soloEvidencias ? "No tienes pedidos pendientes de evidencias." : rol === "comprador" ? "Aún no tienes compras. Cuando elijas una oferta aparecerá aquí." : "Aún no tienes pedidos. Aparecen cuando un comprador elige tu oferta."}
         </p>
       )}
-      <ul className="space-y-3">{lista.map((p) => <Tarjeta key={p.order_id} p={p} rol={rol} />)}</ul>
+      {ocultables.isError && <p role="alert" className="text-error">No se pudo comprobar qué pedidos puedes quitar.</p>}
+      <SeleccionHistorial historial={historial} ids={lista.filter(sePuedeQuitar).map((p) => p.order_id)} />
+      <ul className="space-y-3">{lista.map((p) => <Tarjeta key={p.order_id} p={p} rol={rol}
+        accion={sePuedeQuitar(p) && <AccionHistorial historial={historial} id={p.order_id} />} />)}</ul>
     </div>
   );
 }

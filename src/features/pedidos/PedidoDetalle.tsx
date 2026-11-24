@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import CierrePedido, { useControlCierre } from "./CierrePedido";
+import ResumenReputacion from "@/features/reputacion/ResumenReputacion";
+import { useEffect, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import CasosPedido from "@/features/reclamos/CasosPedido";
 import CalificarPedido from "@/features/reputacion/CalificarPedido";
@@ -7,6 +9,7 @@ import Boton from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import { comprimirImagen } from "@/lib/imagen";
 import { soles } from "@/lib/format";
+import FotoContraparte, { useFotosContraparte } from "@/features/reputacion/FotoContraparte";
 import { supabase } from "@/lib/supabase";
 import { useEventos, useEvidencias, usePedidos } from "./hooks";
 import {
@@ -155,7 +158,7 @@ function CodigoComprador({ p }: { p: Pedido }) {
       <h3 className="font-display text-lg font-bold">Tu código de entrega</h3>
       <p className="font-display text-5xl font-extrabold tracking-[0.3em] text-pino" aria-label={`Código ${c.codigo.split("").join(" ")}`}>{c.codigo}</p>
       <ul className="list-disc space-y-1 pl-5 text-sm">
-        <li><strong>Díctaselo al vendedor solo cuando tengas el producto en tus manos.</strong> No lo compartas por chat ni antes de recibirlo.</li>
+        <li><strong>Díctaselo al vendedor solo después de recibir y revisar el producto.</strong> No lo compartas por chat ni antes de recibirlo.</li>
         <li>Vence el {new Date(c.vence).toLocaleDateString("es-PE", { day: "numeric", month: "long" })}.</li>
         {bloqueado && <li className="font-semibold">Hubo varios intentos fallidos: el código está bloqueado un rato. Puedes generar uno nuevo.</li>}
       </ul>
@@ -244,36 +247,39 @@ function AccionesTienda({ p }: { p: Pedido }) {
   );
 }
 
-function AccionesComprador({ p }: { p: Pedido }) {
-  const cliente = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
-  const completar = useMutation({
-    mutationFn: async () => {
-      if (!supabase) throw new Error("Sin conexión");
-      const { error: e } = await supabase.rpc("completar_pedido", { p_order: p.order_id });
-      if (e) throw new Error(traducirErrorPedido(e.message));
-    },
-    onSuccess: () => { setError(null); void cliente.invalidateQueries({ queryKey: ["pedidos"] }); },
-    onError: (e) => setError(e instanceof Error ? e.message : "Error"),
-  });
-  if (p.estado !== "entregado") return null;
+function PerfilPedido({ pedido, nombre }: { pedido: Pedido; nombre: string }) {
+  const tienda = pedido.mi_rol === "comprador";
+  const perfil = useFotosContraparte("pedido", [pedido.order_id]).data?.get(pedido.order_id);
   return (
-    <section className="space-y-3 rounded-xl border border-borde bg-white p-4">
-      <h3 className="font-display text-lg font-bold text-pino">¿Todo bien con tu compra?</h3>
-      <p className="text-sm text-suave">Si recibiste lo acordado, cierra la operación. Puedes calificar antes o después de completar la operación.</p>
-      {error && <p role="alert" className="text-sm font-semibold text-error">{error}</p>}
-      <Boton variante="secundario" disabled={completar.isPending} onClick={() => { if (confirm("¿Confirmas que todo está bien y quieres completar la operación?")) completar.mutate(); }}>Completar la operación</Boton>
-    </section>
+    <div className="flex items-start gap-3">
+      <FotoContraparte nombre={nombre} url={perfil?.url} className={tienda ? "size-12 rounded-xl" : "size-12 rounded-full"} />
+      <div className="min-w-0 space-y-2">
+        <div>
+          <p className="text-sm text-suave">{tienda ? "Tienda" : "Comprador"}</p>
+          {perfil?.tiendaPublica ? <Link to={`/tiendas/${pedido.store_id}`} className="break-words font-bold text-mercado underline">{nombre}</Link>
+            : <p className="break-words font-bold text-pino">{nombre}</p>}
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-pino">{tienda ? "Reputación de la tienda" : "Reputación del comprador"}</p>
+          <ResumenReputacion id={tienda ? pedido.store_id : pedido.buyer_id} tipo={tienda ? "tienda" : "comprador"} />
+        </div>
+      </div>
+    </div>
   );
 }
 
 export default function PedidoDetalle({ rol }: { rol: Rol }) {
   const { orderId = "" } = useParams();
+  const { state } = useLocation();
   const { session } = useAuth();
   const uid = session?.user.id ?? "";
   const lista = usePedidos();
   const eventos = useEventos(orderId);
+  const cierre = useControlCierre(orderId, uid);
   const p = lista.data?.find((x) => x.order_id === orderId && x.mi_rol === rol);
+  useEffect(() => {
+    if (p && state?.desdeReclamos) document.getElementById("resumen-del-pedido")?.scrollIntoView({ block: "start" });
+  }, [p?.order_id, state]);
   const volver = <p><Link to={rol === "comprador" ? "/comprador/mis-compras" : "/vendedor/pedidos"} className="font-bold text-mercado underline">← {rol === "comprador" ? "Mis compras" : "Pedidos"}</Link></p>;
 
   if (lista.isLoading) return <p className="text-suave">Cargando…</p>;
@@ -286,18 +292,22 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
   return (
     <div className="space-y-4">
       {volver}
-      <header className="space-y-2 rounded-xl border border-borde bg-white p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h2 className="font-display text-2xl font-extrabold">{p.solicitud}</h2>
-            <p className="text-sm text-suave">{rol === "comprador" ? "Tienda" : "Comprador"}: {otro} · {p.modo === "domicilio" ? "Entrega a domicilio" : "Recojo en tienda"}</p>
-          </div>
-          <div className="text-right">
+      <header id="resumen-del-pedido" className="scroll-mt-24 space-y-4 rounded-xl border border-borde bg-white p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h2 className="min-w-0 break-words font-display text-2xl font-extrabold">{p.solicitud}</h2>
+          <div className="sm:text-right">
             <p className="text-2xl font-extrabold text-pino">{soles(p.precio)}</p>
             <p className="text-sm font-bold">{etiquetaEstado(p.estado, p.modo)}</p>
           </div>
         </div>
-        <Progreso p={p} />
+        <div className="space-y-2 rounded-lg bg-hoja/40 p-3">
+          <PerfilPedido pedido={p} nombre={otro} />
+        </div>
+        <section aria-label="Seguimiento del pedido" className="space-y-2 border-t border-borde pt-3">
+          <h3 className="text-sm font-bold text-pino">Seguimiento del pedido</h3>
+          <p className="text-sm text-suave">{p.modo === "domicilio" ? "Entrega a domicilio" : "Recojo en tienda"}</p>
+          <Progreso p={p} />
+        </section>
         <p className="text-sm">
           {p.conversation_id && <Link to={`/${rol}/chat/${p.conversation_id}`} className="font-bold text-mercado underline">Abrir el chat</Link>}
           {p.conversation_id && " · "}
@@ -306,11 +316,12 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
       </header>
 
       {rol === "vendedor" && <AccionesTienda p={p} />}
-      {rol === "vendedor" && enEntrega && <ConfirmarEntrega p={p} />}
+      {rol === "vendedor" && enEntrega && cierre.isSuccess && cierre.data?.reporte !== "pendiente" && <ConfirmarEntrega p={p} />}
       {rol === "comprador" && <CodigoComprador p={p} />}
-      {rol === "comprador" && <AccionesComprador p={p} />}
-      {(p.estado === "entregado" || p.estado === "completada") && <CalificarPedido key={p.order_id + p.mi_rol + uid} p={p} uid={uid} />}
-      <CasosPedido key={p.order_id + p.mi_rol + uid} pedido={p} uid={uid} />
+      {cierre.isError && <p role="alert" className="text-error">No se pudo consultar el cierre de la operación.</p>}
+      {cierre.isSuccess && <CierrePedido id={p.order_id} uid={uid} rol={rol} estado={p.estado} control={cierre.data} />}
+      {(p.estado === "entregado" || p.estado === "completada") && <CalificarPedido key={`calificacion:${p.order_id}:${p.mi_rol}:${uid}`} p={p} uid={uid} />}
+      <CasosPedido key={`casos:${p.order_id}:${p.mi_rol}:${uid}`} pedido={p} uid={uid} />
       <Evidencias p={p} editable={rol === "vendedor" && (antesDeEnviar || (p.modo === "recojo" && enEntrega))} uid={uid} />
 
       <section className="space-y-2 rounded-xl border border-borde bg-white p-4">

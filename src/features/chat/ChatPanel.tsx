@@ -1,4 +1,6 @@
+import FotoContraparte, { useFotosContraparte } from "@/features/reputacion/FotoContraparte";
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { AccionHistorial, SeleccionHistorial, useHistorialPersonal } from "@/features/comprador/HistorialPersonal";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
@@ -91,7 +93,7 @@ function Compositor({ c, uid, alEnviar }: { c: Conversacion; uid: string; alEnvi
   );
 }
 
-function Hilo({ c, rol }: { c: Conversacion; rol: Rol }) {
+function Hilo({ c, rol, foto, tiendaPublica }: { c: Conversacion; rol: Rol; foto?: string | null; tiendaPublica?: boolean }) {
   const { session } = useAuth();
   const uid = session?.user.id ?? "";
   const cliente = useQueryClient();
@@ -125,9 +127,13 @@ function Hilo({ c, rol }: { c: Conversacion; rol: Rol }) {
     <div className="flex h-[70vh] min-h-[420px] flex-col rounded-xl border border-borde bg-hoja/40">
       <header className="space-y-1 border-b border-borde bg-white p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="truncate font-display text-lg font-bold">{otro}</p>
-            <p className="truncate text-sm text-suave">{c.solicitud}</p>
+          <div className="flex min-w-0 items-center gap-2">
+            <FotoContraparte nombre={otro} url={foto} className={rol === "comprador" ? "size-10 rounded-lg" : "size-10 rounded-full"} />
+            <div className="min-w-0">
+              {rol === "comprador" && tiendaPublica ? <Link to={`/tiendas/${c.store_id}`} className="block truncate font-display text-lg font-bold text-mercado underline">{otro}</Link>
+                : <p className="truncate font-display text-lg font-bold">{otro}</p>}
+              <p className="truncate text-sm text-suave">{c.solicitud}</p>
+            </div>
           </div>
           <div className="space-y-1 text-right text-sm">
             {c.estado_pedido && <span className="inline-block rounded-full bg-hoja px-3 py-0.5 font-semibold text-pino">{etiquetaPedido[c.estado_pedido] ?? c.estado_pedido}</span>}
@@ -178,15 +184,18 @@ function Hilo({ c, rol }: { c: Conversacion; rol: Rol }) {
   );
 }
 
-function ItemConversacion({ c, rol, activa }: { c: Conversacion; rol: Rol; activa: boolean }) {
+function ItemConversacion({ c, rol, activa, historial, foto }: { c: Conversacion; foto?: string | null; rol: Rol; activa: boolean; historial: ReturnType<typeof useHistorialPersonal> }) {
   const otro = rol === "comprador" ? c.tienda : c.comprador || "Comprador";
   const vista = c.ultimo_texto ?? (c.ultimo_tiene_foto ? "📷 Foto" : "Sin mensajes todavía");
   return (
-    <li>
+    <li className={`flex items-start gap-2 rounded-xl border ${activa ? "border-mercado bg-hoja" : "border-borde bg-white hover:bg-hoja"}`}>
       <Link to={`/${rol}/chat/${c.conversation_id}`} aria-current={activa ? "page" : undefined}
-        className={`block space-y-0.5 rounded-xl border p-3 ${activa ? "border-mercado bg-hoja" : "border-borde bg-white hover:bg-hoja"}`}>
+        className="block min-w-0 flex-1 space-y-1 rounded-xl p-3">
         <div className="flex items-start justify-between gap-2">
-          <p className="truncate font-bold">{otro}</p>
+          <div className="flex min-w-0 items-center gap-2">
+            <FotoContraparte nombre={otro} url={foto} className={rol === "comprador" ? "size-8 rounded-lg" : "size-8 rounded-full"} />
+            <p className="truncate font-bold">{otro}</p>
+          </div>
           <div className="flex shrink-0 items-center gap-2">
             {c.ultimo_envio && <span className="text-xs text-suave">{hora(c.ultimo_envio)}</span>}
             {c.no_leidos > 0 && <span className="min-w-5 rounded-full bg-maiz px-1.5 text-center text-xs font-extrabold text-tinta" aria-label={`${c.no_leidos} sin leer`}>{c.no_leidos}</span>}
@@ -195,6 +204,9 @@ function ItemConversacion({ c, rol, activa }: { c: Conversacion; rol: Rol; activ
         <p className="truncate text-sm text-suave">{c.solicitud}</p>
         <p className={`truncate text-sm ${c.no_leidos > 0 ? "font-bold" : ""}`}>{vista}</p>
       </Link>
+      {historial.listo && <div className="shrink-0 pr-2 pt-1">
+        <AccionHistorial historial={historial} id={c.conversation_id} />
+      </div>}
     </li>
   );
 }
@@ -203,26 +215,31 @@ export default function ChatPanel({ rol }: { rol: Rol }) {
   const { conversacionId } = useParams();
   const lista = useConversaciones();
   const propias = (lista.data ?? []).filter((c) => c.mi_rol === rol);
+  const historial = useHistorialPersonal(rol === "comprador" ? "chat" : "chat_tienda");
+  const visibles = propias.filter((c) => historial.visible(c.conversation_id));
   const actual = propias.find((c) => c.conversation_id === conversacionId);
+  const fotos = useFotosContraparte("chat", propias.map((c) => c.conversation_id)).data;
+  const perfilActual = actual ? fotos?.get(actual.conversation_id) : undefined;
 
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-      <aside className={conversacionId ? "hidden lg:block" : ""} aria-label="Conversaciones">
+      <aside className={`min-w-0 space-y-4 ${conversacionId ? "hidden lg:block" : ""}`} aria-label="Conversaciones">
         {lista.isLoading && <p className="text-suave">Cargando…</p>}
         {lista.error && <p role="alert" className="text-error">No se pudieron cargar tus conversaciones.</p>}
-        {!lista.isLoading && propias.length === 0 && (
+        {!lista.isLoading && visibles.length === 0 && (
           <p className="rounded-xl bg-white p-6 text-suave">
             {rol === "comprador"
               ? "Cuando elijas una oferta se abrirá aquí una conversación privada con la tienda."
               : "Cuando un comprador elija tu oferta se abrirá aquí una conversación privada con él."}
           </p>
         )}
-        <ul className="space-y-2">{propias.map((c) => <ItemConversacion key={c.conversation_id} c={c} rol={rol} activa={c.conversation_id === conversacionId} />)}</ul>
+        <SeleccionHistorial historial={historial} ids={visibles.map((c) => c.conversation_id)} />
+        <ul className="space-y-3">{visibles.map((c) => <ItemConversacion key={c.conversation_id} c={c} rol={rol} activa={c.conversation_id === conversacionId} historial={historial} foto={fotos?.get(c.conversation_id)?.url} />)}</ul>
       </aside>
-      <section className={!conversacionId ? "hidden lg:block" : ""} aria-label="Mensajes">
+      <section className={`min-w-0 ${!conversacionId ? "hidden lg:block" : ""}`} aria-label="Mensajes">
         {conversacionId && <p className="mb-2 lg:hidden"><Link to={`/${rol}/chat`} className="font-bold text-mercado underline">← Conversaciones</Link></p>}
         {!conversacionId && <p className="rounded-xl bg-white p-6 text-suave">Elige una conversación para ver los mensajes.</p>}
-        {conversacionId && actual && <Hilo key={actual.conversation_id} c={actual} rol={rol} />}
+        {conversacionId && actual && <Hilo key={actual.conversation_id} c={actual} rol={rol} foto={perfilActual?.url} tiendaPublica={perfilActual?.tiendaPublica} />}
         {conversacionId && !actual && !lista.isLoading && <p className="rounded-xl bg-white p-6 text-suave">No encontramos esa conversación o no tienes acceso a ella.</p>}
       </section>
     </div>

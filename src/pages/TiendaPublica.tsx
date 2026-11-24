@@ -1,6 +1,7 @@
-import { Link, useParams } from "react-router-dom";
+import ResenasPublicasTienda from "@/features/reputacion/ResenasPublicasTienda";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { cargarReputacion, textoReputacion } from "@/features/reputacion/reputacion";
+import ResumenReputacion from "@/features/reputacion/ResumenReputacion";
 import { usePromocionesPublicas } from "@/features/monetizacion/datos";
 import TarjetaProducto from "@/components/TarjetaProducto";
 import type { ProductoCatalogo } from "@/features/catalogo/tipos";
@@ -19,6 +20,15 @@ type FilaProducto = {
 
 export default function TiendaPublica() {
   const { id } = useParams();
+  const [parametros, setParametros] = useSearchParams();
+  const valor = Number(parametros.get("estrellas"));
+  const estrellas = Number.isInteger(valor) && valor >= 1 && valor <= 5 ? valor : null;
+  function filtrarResenas(puntuacion: number | null) {
+    const siguientes = new URLSearchParams(parametros);
+    if (puntuacion === null) siguientes.delete("estrellas");
+    else siguientes.set("estrellas", String(puntuacion));
+    setParametros(siguientes, { preventScrollReset: true });
+  }
   const consulta = useQuery({
     queryKey: ["tienda-publica", id],
     enabled: Boolean(id && supabase),
@@ -38,12 +48,6 @@ export default function TiendaPublica() {
       if (p.error) throw p.error;
       return { tienda: t.data as unknown as Tienda, productos: (p.data ?? []) as unknown as FilaProducto[] };
     },
-  });
-
-  const reputacion = useQuery({
-    queryKey: ["reputacion-tienda", id],
-    enabled: Boolean(id && consulta.data),
-    queryFn: async () => (await cargarReputacion(id ? [id] : []))[0] ?? null,
   });
 
   const promociones = usePromocionesPublicas("productos", consulta.data?.productos.map((p) => p.id) ?? []);
@@ -68,13 +72,12 @@ export default function TiendaPublica() {
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <p><Link to="/tiendas" className="font-bold text-mercado underline">← Tiendas</Link></p>
-      <header className="flex flex-wrap items-center gap-4 rounded-xl border border-borde bg-white p-5">
-        {logo ? <img src={logo} alt="" className="h-20 w-20 rounded-xl object-cover" /> : <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-mercado font-display text-3xl font-extrabold text-white" aria-hidden="true">{t.name.charAt(0)}</div>}
-        <div className="min-w-0 flex-1 space-y-1">
-          <h1 className="font-display text-3xl font-extrabold">{t.name}</h1>
+      <header className="flex flex-wrap items-start gap-5 rounded-2xl border border-borde border-t-4 border-t-mercado bg-white p-5 sm:p-7">
+        {logo ? <img src={logo} alt="" className="h-20 w-20 shrink-0 rounded-xl border border-borde object-cover" /> : <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-mercado font-display text-3xl font-extrabold text-white" aria-hidden="true">{t.name.charAt(0)}</div>}
+        <div className="min-w-48 flex-1 space-y-2">
+          <h1 className="break-words font-display text-3xl font-extrabold text-pino">{t.name}</h1>
           <p className="text-sm text-suave">{t.store_categories.map((c) => c.categories?.name).filter(Boolean).join(", ")}</p>
-          {reputacion.data && <p className="text-sm font-semibold">{textoReputacion(reputacion.data)}</p>}
-          {reputacion.isError && <p className="text-sm text-suave">Reputación no disponible.</p>}
+          {t.description && <p className="whitespace-pre-line break-words">{t.description}</p>}
           {t.address && <p>{t.address}</p>}
           {t.phone && <p className="text-sm">Teléfono: {t.phone}</p>}
           <p className="flex flex-wrap gap-2 pt-1 text-sm">
@@ -83,7 +86,11 @@ export default function TiendaPublica() {
           </p>
         </div>
       </header>
-      {t.description && <p className="whitespace-pre-line">{t.description}</p>}
+      <section className="space-y-4 rounded-2xl border border-borde bg-white p-5 sm:p-7">
+        <h2 className="font-display text-2xl font-extrabold text-pino">Calificaciones de la tienda</h2>
+        <ResumenReputacion id={t.id} tipo="tienda" mostrarVentas mostrarDistribucion estrellas={estrellas} alFiltrar={filtrarResenas} />
+        <ResenasPublicasTienda id={t.id} estrellas={estrellas} limpiar={() => filtrarResenas(null)} />
+      </section>
       <h2 className="font-display text-2xl font-extrabold text-pino">Productos de la tienda</h2>
       {cards.length === 0 ? <p className="rounded-xl bg-white p-6 text-suave">Esta tienda aún no publicó productos.</p> : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{cards.map((p) => <TarjetaProducto key={p.id} p={p} promocionado={promociones.data?.has(p.id)} />)}</div>

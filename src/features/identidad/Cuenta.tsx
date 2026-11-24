@@ -1,3 +1,4 @@
+import ResumenReputacion from "@/features/reputacion/ResumenReputacion";
 import { Link } from "react-router-dom";
 import FotoPerfil from "@/components/FotoPerfil";
 import Boton, { clasesBoton } from "@/components/Boton";
@@ -23,6 +24,7 @@ export default function Cuenta({ enPanel = false }: { enPanel?: boolean }) {
         <FotoPerfil className="mb-2 h-16 w-16 text-xl" />
         <p className="font-bold">{perfil?.full_name || "Sin nombre registrado"}</p>
         <p className="max-w-full break-words text-suave">{perfil?.email ?? session?.user.email}</p>
+        {enPanel && <ResumenReputacion id={session?.user.id ?? ""} tipo="comprador" mostrarDistribucion />}
       </section>
 
       {enPanel && perfil && <EditarTelefono key={perfil.id} />}

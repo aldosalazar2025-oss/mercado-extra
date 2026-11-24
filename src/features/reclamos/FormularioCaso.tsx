@@ -9,7 +9,7 @@ type Props = {
   minimo?: number;
   opciones?: readonly (readonly [string, string])[];
   ejecutar: (texto: string, opcion: string, dias: number, horas: number) => Promise<void>;
-  confirmar?: boolean;
+  confirmar?: boolean | ((opcion: string) => string);
   pedirDias?: boolean;
   destinatario?: string;
   repetir?: boolean;
@@ -35,7 +35,7 @@ export function FormularioCaso({ titulo, boton = titulo, etiquetaTexto = "Explic
       <summary className="cursor-pointer font-bold text-mercado">{titulo}</summary>
       <form className="mt-3 space-y-3" onSubmit={(event) => {
         event.preventDefault();
-        if (duracionValida && texto.trim().length >= minimo && (!confirmar || confirm(destinatario ? `¿Confirmas la sanción para ${destinatario}?` : "¿Confirmas esta acción?"))) envio.mutate();
+        if (duracionValida && texto.trim().length >= minimo && (!confirmar || confirm(typeof confirmar === "function" ? confirmar(opcion) : destinatario ? `¿Confirmas la sanción para ${destinatario}?` : "¿Confirmas esta acción?"))) envio.mutate();
       }}>
         <fieldset className="space-y-3" disabled={envio.isPending}>
           {destinatario && <p className="rounded-lg bg-hoja/40 p-3 text-sm"><strong>Se sancionará a </strong>{destinatario}</p>}

@@ -5,6 +5,7 @@ import Boton, { clasesBoton } from "@/components/Boton";
 import { useAuth } from "@/features/auth/AuthContext";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
+import { AccionHistorial, SeleccionHistorial, useHistorialPersonal } from "@/features/comprador/HistorialPersonal";
 import { COLUMNAS_SOLICITUD, etiquetaSolicitud, tiempoRestante, type EstadoSolicitud, type Solicitud } from "./tipos";
 
 export default function MisSolicitudes({ soloOfertas = false }: { soloOfertas?: boolean }) {
@@ -49,8 +50,10 @@ export default function MisSolicitudes({ soloOfertas = false }: { soloOfertas?: 
     if (!pregunta || confirm(pregunta)) cambiar.mutate({ id, estado });
   };
 
-  const filas = (lista.data ?? []).filter((s) => !soloOfertas
-    || ((s.status === "con_ofertas" || s.status === "atendida") && s.offers.some((oferta) => oferta.status === "enviada" || oferta.status === "aceptada")));
+  const historial = useHistorialPersonal(soloOfertas ? "bandeja_ofertas" : "solicitudes");
+  const filas = (lista.data ?? []).filter((s) => historial.visible(s.id) && (!soloOfertas
+    || ((s.status === "con_ofertas" || s.status === "atendida") && s.offers.some((oferta) => oferta.status === "enviada" || oferta.status === "aceptada"))));
+  const puedeQuitar = (s: Solicitud) => soloOfertas || ["atendida", "vencida", "cancelada"].includes(s.status);
 
   return (
     <div className="space-y-4">
@@ -62,6 +65,7 @@ export default function MisSolicitudes({ soloOfertas = false }: { soloOfertas?: 
       {lista.isLoading && <p className="text-suave">Cargando…</p>}
       {lista.error && <p role="alert" className="text-error">No se pudieron cargar tus solicitudes.</p>}
       {lista.isSuccess && filas.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">{soloOfertas ? "Aún no tienes ofertas para comparar ni ofertas elegidas." : "Aún no publicaste solicitudes. Cuéntanos qué necesitas y las tiendas te harán ofertas."}</p>}
+      <SeleccionHistorial historial={historial} ids={filas.filter(puedeQuitar).map((s) => s.id)} />
       <ul className="space-y-3">
         {filas.map((s) => {
           const e = etiquetaSolicitud[s.status];
@@ -77,7 +81,10 @@ export default function MisSolicitudes({ soloOfertas = false }: { soloOfertas?: 
                   {s.request_images.length > 0 && <p className="text-sm text-suave">{s.request_images.length} foto(s) de referencia</p>}
                 </div>
                 <div className="space-y-1 text-right">
-                  <span className={`inline-block rounded-full px-3 py-1 text-sm font-bold ${e.clase}`}>{e.texto}</span>
+                  <div className="flex items-center justify-end gap-2">
+                    <span className={`inline-block rounded-full px-3 py-1 text-sm font-bold ${e.clase}`}>{e.texto}</span>
+                    {puedeQuitar(s) && <AccionHistorial historial={historial} id={s.id} />}
+                  </div>
                   {s.status === "abierta" && <p className="text-sm font-semibold">{tiempoRestante(s.expires_at, ahora)}</p>}
                   {s.status === "con_ofertas" && <p className="text-sm font-semibold">{s.offers.filter((o) => o.status === "enviada").length} oferta(s) para comparar</p>}
                 </div>

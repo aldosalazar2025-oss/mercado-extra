@@ -36,22 +36,27 @@ export function ArchivosCaso({ rutas, bucket = bucketCasos }: { rutas: string[];
   );
 }
 
-export function AdjuntarEvidencia({ id, uid, cancelacion = false }: { id: string; uid: string; cancelacion?: boolean }) {
+export function AdjuntarEvidencia({ id, uid, cancelacion = false, devolucion = false, cumplimiento = false, entregaSinCodigo = false }: { id: string; uid: string; cancelacion?: boolean; devolucion?: boolean; cumplimiento?: boolean; entregaSinCodigo?: boolean }) {
   const entrada = useRef<HTMLInputElement>(null);
+  const [motivo, setMotivo] = useState("");
   const [archivo, setArchivo] = useState<File | null>(null);
   const [rutaCargada, setRutaCargada] = useState<string | null>(null);
   const guardar = useCasosMutation(async (file: File) => {
     if (!supabase) throw new Error("Sin conexión");
     const extension = formatos[file.type];
     if (!extension || file.size > 50 * 1024 * 1024) throw new Error("Usa una imagen JPG, PNG o WebP, un video MP4 o un PDF de hasta 50 MB.");
-    const carpeta = cancelacion ? `cancelaciones/${id}/${uid}` : `${id}/${uid}`;
+    const carpeta = entregaSinCodigo ? `entregas-sin-codigo/${id}/${uid}` : devolucion || cumplimiento ? `devoluciones/${id}/${uid}` : cancelacion ? `cancelaciones/${id}/${uid}` : `${id}/${uid}`;
     const ruta = rutaCargada ?? `${carpeta}/${crypto.randomUUID()}.${extension}`;
     if (!rutaCargada) {
       const { error } = await supabase.storage.from(bucketCasos).upload(ruta, file);
       if (error) throw new Error(error.message);
       setRutaCargada(ruta);
     }
-    if (cancelacion) {
+    if (entregaSinCodigo) {
+      await accion("gestionar_cierre_pedido", { p_order: id, p_accion: "reportar", p_nota: motivo.trim(), p_evidencia: ruta });
+    } else if (devolucion || cumplimiento) {
+      await accion("gestionar_devolucion", { p_reclamo: id, p_accion: cumplimiento ? "cumplir" : "enviar", p_evidencia: ruta });
+    } else if (cancelacion) {
       await accion("adjuntar_cancelacion", { p_id: id, p_ruta: ruta });
     } else {
       const kind = extension === "pdf" ? "documento" : extension === "mp4" ? "video" : "foto";
@@ -65,16 +70,22 @@ export function AdjuntarEvidencia({ id, uid, cancelacion = false }: { id: string
   return (
     <form className="space-y-2" onSubmit={(e) => {
       e.preventDefault();
-      if (archivo) guardar.mutate(archivo);
+      if (archivo && (!entregaSinCodigo || motivo.trim().length >= 5)) guardar.mutate(archivo);
     }}>
-      <label className="block text-sm font-bold">Adjuntar evidencia
+      {entregaSinCodigo && <label className="block text-sm font-bold">¿Cómo se entregó el producto?
+        <textarea className="mt-1 block w-full rounded-lg border border-borde p-2 font-normal" value={motivo}
+          onChange={(e) => setMotivo(e.target.value)} minLength={5} maxLength={3000} rows={3} required disabled={guardar.isPending} />
+      </label>}
+      <label className="block text-sm font-bold">{entregaSinCodigo ? "Comprobante de entrega" : cumplimiento ? "Evidencia de entrega" : devolucion ? "Evidencia de la devolución" : "Adjuntar evidencia"}
         <input ref={entrada} type="file" accept={Object.keys(formatos).join(",")}
-          className="mt-1 block w-full text-sm font-normal" disabled={guardar.isPending || Boolean(rutaCargada)}
+          className={cancelacion ? "mt-1 block w-full text-sm font-normal" :
+            "mt-2 block w-full text-sm font-normal text-suave file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-hoja file:px-3 file:py-2 file:font-semibold file:text-pino"}
+          disabled={guardar.isPending || Boolean(rutaCargada)}
           onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
       </label>
       {guardar.isError && <p role="alert" className="text-sm text-error">{guardar.error.message}</p>}
       {guardar.isSuccess && <p role="status" className="text-sm text-pino">Evidencia registrada.</p>}
-      <Boton variante="contorno" type="submit" disabled={!archivo || guardar.isPending}>{guardar.isPending ? "Subiendo…" : "Adjuntar archivo"}</Boton>
+      <Boton variante="contorno" type="submit" disabled={!archivo || guardar.isPending || (entregaSinCodigo && motivo.trim().length < 5)}>{guardar.isPending ? "Subiendo…" : entregaSinCodigo ? "Enviar reporte" : cumplimiento ? "Registrar entrega acordada" : devolucion ? "Registrar devolución" : "Adjuntar archivo"}</Boton>
     </form>
   );
 }

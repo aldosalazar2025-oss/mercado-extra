@@ -34,7 +34,9 @@ export function EliminarRegistros({ tabla, ids, plan, alEliminar, modo = "elimin
     mutationFn: async () => {
       if (!supabase) throw new Error("Sin conexión");
       const { data, error } = modo === "archivar"
-        ? await supabase.rpc("admin_archivar_cancelaciones", { p_ids: ids })
+        ? tabla === "cancellations"
+          ? await supabase.rpc("admin_archivar_cancelaciones", { p_ids: ids })
+          : await supabase.rpc("admin_archivar_ventas", { p_tabla: tabla, p_ids: ids })
         : await supabase.rpc("admin_enviar_papelera", { p_tabla: tabla, p_ids: ids });
       if (error) throw new Error(error.message);
       return Number(data);
@@ -45,7 +47,7 @@ export function EliminarRegistros({ tabla, ids, plan, alEliminar, modo = "elimin
     },
   });
 
-  const etiqueta = modo === "archivar" ? (alEliminar ? "Archivar selección" : "Archivar cancelación")
+  const etiqueta = modo === "archivar" ? (alEliminar ? "Archivar selección" : "Archivar registro")
     : plan ? "Eliminar plan" : alEliminar ? "Eliminar selección" : "Eliminar registro";
   return (
     <div>
@@ -53,12 +55,12 @@ export function EliminarRegistros({ tabla, ids, plan, alEliminar, modo = "elimin
         className={`inline-flex size-10 items-center justify-center rounded-lg focus-visible:outline-2 disabled:opacity-40 ${modo === "archivar" ? "text-mercado hover:bg-hoja" : "text-error hover:bg-red-50"}`}
         onClick={() => {
         const seleccion = plan ? `el plan «${plan}»` : alEliminar ? `los ${ids.length} registros seleccionados` : "este registro";
-        const mensaje = modo === "archivar" ? `¿Archivar ${seleccion} conservando el historial y la sanción? Puedes recuperarlo desde Auditoría.`
+        const mensaje = modo === "archivar" ? `¿Archivar ${seleccion} conservando el historial? Puedes recuperarlo desde Auditoría.`
           : `¿Enviar a la papelera ${seleccion}? Puedes recuperarlos desde Auditoría durante 15 días.`;
         if (confirm(mensaje)) archivar.mutate();
       }}>
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="size-5">
-          <path d={modo === "archivar" ? "M3 4h18v5H3zM5 9v11h14V9m-9 4h4" : "M3 6h18M9 6V4h6v2m4 0-1 14H6L5 6m5 4v6m4-6v6"} />
+          <path d="M3 6h18M9 6V4h6v2m4 0-1 14H6L5 6m5 4v6m4-6v6" />
         </svg>
       </button>
       {archivar.isSuccess && <p role="status" className="text-sm text-pino">

@@ -4,6 +4,7 @@ export type Reputacion = {
   id: string;
   calificacion_promedio: number | null;
   total_calificaciones: number;
+  conteo_estrellas: number[];
   ventas_completadas: number;
 };
 

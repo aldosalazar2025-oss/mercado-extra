@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
 import Campo, { estiloInput } from "@/components/Campo";
@@ -7,6 +7,26 @@ import { supabase } from "@/lib/supabase";
 import type { Tienda } from "./tipos";
 
 type Props = { inicial?: Tienda; categoriasIniciales?: string[]; onGuardado: (id: string) => void };
+
+const claveMapas = import.meta.env.VITE_GEOAPIFY_API_KEY?.trim();
+
+async function buscarDireccion(lat: number, lng: number, apiKey: string) {
+  const params = new URLSearchParams({ lat: String(lat), lon: String(lng), format: "json", lang: "es", limit: "1", apiKey });
+  const respuesta = await fetch(`https://api.geoapify.com/v1/geocode/reverse?${params}`, {
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!respuesta.ok) throw new Error("No se pudo consultar la dirección.");
+  const { results } = await respuesta.json() as { results?: {
+    street?: string; housenumber?: string; district?: string; suburb?: string; city?: string;
+  }[] };
+  const lugar = results?.[0];
+  const distrito = lugar?.district || lugar?.city || lugar?.suburb;
+  const calle = [lugar?.street, lugar?.street && lugar.housenumber].filter(Boolean).join(" ");
+  return {
+    texto: [...new Set([calle, distrito].filter(Boolean))].join(", "),
+    completa: Boolean(calle && lugar?.housenumber && distrito),
+  };
+}
 
 export default function FormularioTienda({ inicial, categoriasIniciales = [], onGuardado }: Props) {
   const cliente = useQueryClient();
@@ -21,9 +41,24 @@ export default function FormularioTienda({ inicial, categoriasIniciales = [], on
   const [recojo, setRecojo] = useState(inicial?.offers_pickup ?? true);
   const [cats, setCats] = useState<string[]>(categoriasIniciales);
   const [logo, setLogo] = useState<File | null>(null);
+  const [miniaturaLogo, setMiniaturaLogo] = useState<string | null>(null);
+  const selectorLogo = useRef<HTMLInputElement>(null);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const [ubicando, setUbicando] = useState(false);
+  const [avisoUbicacion, setAvisoUbicacion] = useState("");
+  const revisionDireccion = useRef(0);
+
+  useEffect(() => {
+    if (!logo) {
+      setMiniaturaLogo(null);
+      return;
+    }
+    const url = URL.createObjectURL(logo);
+    setMiniaturaLogo(url);
+    return () => URL.revokeObjectURL(url);
+  }, [logo]);
 
   const categorias = useQuery({
     queryKey: ["categorias"],
@@ -35,15 +70,46 @@ export default function FormularioTienda({ inicial, categoriasIniciales = [], on
   });
 
   function usarUbicacion() {
-    if (!navigator.geolocation) return setError("Tu navegador no permite obtener la ubicación.");
+    if (!navigator.geolocation) return setAvisoUbicacion("Tu navegador no permite obtener la ubicación.");
+    setUbicando(true);
+    setAvisoUbicacion("");
+    const revision = revisionDireccion.current;
     navigator.geolocation.getCurrentPosition(
-      (p) => { setLat(Number(p.coords.latitude.toFixed(6))); setLng(Number(p.coords.longitude.toFixed(6))); setError(null); },
-      () => setError("No pudimos obtener tu ubicación. Revisa el permiso del navegador."),
+      async ({ coords }) => {
+        const latitud = Number(coords.latitude.toFixed(6));
+        const longitud = Number(coords.longitude.toFixed(6));
+        setLat(latitud);
+        setLng(longitud);
+        try {
+          if (!claveMapas) {
+            setAvisoUbicacion("Ubicación detectada. Completa la dirección a mano.");
+            return;
+          }
+          const sugerencia = await buscarDireccion(latitud, longitud, claveMapas);
+          if (sugerencia.texto && revision === revisionDireccion.current) {
+            setDireccion(sugerencia.texto);
+            setErrores((actuales) => ({ ...actuales, direccion: "" }));
+            setAvisoUbicacion(sugerencia.completa ? "Esta es tu ubicación." : "Esta es tu ubicación. Completa los datos que falten.");
+          } else if (!sugerencia.texto) {
+            setAvisoUbicacion("No encontramos una dirección para esta ubicación. Puedes escribirla a mano.");
+          }
+        } catch {
+          setAvisoUbicacion("No pudimos consultar la dirección. Puedes escribirla a mano.");
+        } finally {
+          setUbicando(false);
+        }
+      },
+      () => {
+        setUbicando(false);
+        setAvisoUbicacion("No pudimos obtener tu ubicación. Revisa el permiso del navegador.");
+      },
+      { enableHighAccuracy: true, timeout: 12000 },
     );
   }
 
   async function guardar(e: FormEvent) {
     e.preventDefault();
+    if (ubicando || enviando) return;
     setError(null);
     const n: Record<string, string> = {};
     if (nombre.trim().length < 2) n.nombre = "Escribe el nombre comercial de la tienda.";
@@ -104,10 +170,16 @@ export default function FormularioTienda({ inicial, categoriasIniciales = [], on
       <Campo etiqueta="Descripción" id="tienda-descripcion">
         <textarea id="tienda-descripcion" rows={3} className={estiloInput} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Qué vendes y qué te distingue" />
       </Campo>
-      <Campo etiqueta="Dirección" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle, número, distrito" error={errores.direccion} />
+      <Campo etiqueta="Dirección" value={direccion} onChange={(e) => {
+        revisionDireccion.current += 1;
+        setDireccion(e.target.value);
+      }} placeholder="Calle, número, distrito" error={errores.direccion} />
       <div className="space-y-1">
-        <Boton type="button" variante="contorno" onClick={usarUbicacion}>Usar mi ubicación actual</Boton>
-        <p className="text-sm text-suave">{lat !== null && lng !== null ? `Ubicación guardada (${lat}, ${lng}). Sirve para mostrar tu tienda a compradores cercanos.` : "Opcional, pero ayuda a que te encuentren compradores cercanos. Hazlo estando en la tienda."}</p>
+        <Boton type="button" variante="contorno" onClick={usarUbicacion} disabled={ubicando}>
+          {ubicando ? "Buscando ubicación…" : "Usar mi ubicación actual"}
+        </Boton>
+        <p role="status" className="text-sm text-suave">{avisoUbicacion ||
+          (claveMapas ? "Geoapify usa tus coordenadas para sugerir la dirección." : "Hazlo estando en la tienda.")}</p>
       </div>
       <Campo etiqueta="Teléfono (opcional)" inputMode="tel" maxLength={9} value={telefono} onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ""))} error={errores.telefono} />
       <Campo etiqueta="RUC (opcional)" inputMode="numeric" maxLength={11} value={ruc} onChange={(e) => setRuc(e.target.value.replace(/\D/g, ""))} error={errores.ruc} />
@@ -129,9 +201,21 @@ export default function FormularioTienda({ inicial, categoriasIniciales = [], on
         <label className="flex min-h-11 items-center gap-3"><input type="checkbox" className="h-5 w-5 accent-[#1e6b45]" checked={recojo} onChange={(e) => setRecojo(e.target.checked)} /> Recojo en tienda</label>
         {errores.entrega && <p className="text-sm font-semibold text-error">{errores.entrega}</p>}
       </fieldset>
-      <Campo etiqueta="Logotipo (opcional)" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setLogo(e.target.files?.[0] ?? null)} />
+      <fieldset className="space-y-2">
+        <legend className="font-bold">Logotipo (opcional)</legend>
+        <input ref={selectorLogo} type="file" hidden accept="image/jpeg,image/png,image/webp"
+          onChange={(e) => setLogo(e.target.files?.[0] ?? null)} />
+        <div className="flex flex-wrap items-center gap-2">
+          {miniaturaLogo && <img src={miniaturaLogo} alt="Vista previa del logotipo"
+            className="size-20 rounded-lg border border-borde bg-white object-contain" />}
+          <Boton type="button" variante="contorno" onClick={() => selectorLogo.current?.click()}>
+            {logo ? "Cambiar foto" : "Añadir foto"}
+          </Boton>
+          {logo && <span className="min-w-0 break-all text-sm text-suave">{logo.name}</span>}
+        </div>
+      </fieldset>
       {error && <p role="alert" className="text-sm font-semibold text-error">{error}</p>}
-      <Boton type="submit" variante="primario" disabled={enviando}>{enviando ? "Guardando…" : inicial ? "Guardar cambios" : "Registrar tienda"}</Boton>
+      <Boton type="submit" variante="primario" disabled={enviando || ubicando}>{enviando ? "Guardando…" : inicial ? "Guardar cambios" : "Registrar tienda"}</Boton>
     </form>
   );
 }

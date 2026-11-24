@@ -22,12 +22,16 @@ language sql stable security definer set search_path = public, pg_temp as $$
     )
 $$;
 
+-- El panel administrativo usa esta marca para conservar las tiendas dadas de baja.
+alter table public.stores add column if not exists admin_baja_at timestamptz;
+
 create or replace function public.tiendas_con_permiso(perm text, solo_aprobadas boolean default false)
 returns setof uuid
 language sql stable security definer set search_path = public, pg_temp as $$
   select s.id
   from public.stores s
   where public.cuenta_activa()
+    and s.admin_baja_at is null and s.status <> 'suspendida'
     and (not solo_aprobadas or s.status = 'aprobada')
     and not exists (
       select 1 from public.sanctions a where a.store_id = s.id
@@ -381,15 +385,35 @@ end $$;
 revoke execute on function public.puede_adjuntar_cancelacion(uuid), public.adjuntar_cancelacion(uuid, text) from public, anon;
 grant execute on function public.puede_adjuntar_cancelacion(uuid), public.adjuntar_cancelacion(uuid, text) to authenticated;
 
+-- El pedido conserva la constancia aunque el caso salga del historial administrativo.
+create table if not exists public.pedidos_con_reclamo (
+  order_id uuid primary key references public.orders(id) on delete cascade
+);
+alter table public.pedidos_con_reclamo enable row level security;
+revoke all on public.pedidos_con_reclamo from public, anon, authenticated;
+insert into public.pedidos_con_reclamo(order_id)
+  select distinct order_id from public.claims on conflict do nothing;
+
+create or replace function public.pedido_tiene_reclamo(p_pedido uuid)
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
+  select exists (
+    select 1 from public.pedidos_con_reclamo r join public.orders o on o.id = r.order_id
+    where o.id = p_pedido and o.buyer_id = auth.uid()
+  )
+$$;
+revoke all on function public.pedido_tiene_reclamo(uuid) from public, anon;
+grant execute on function public.pedido_tiene_reclamo(uuid) to authenticated;
+
 create or replace function public.validar_nuevo_reclamo() returns trigger
 language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   perform 1 from public.orders o where o.id = new.order_id and o.buyer_id = new.buyer_id
-    and o.store_id = new.store_id and o.status in ('enviado_o_listo', 'pendiente_confirmacion', 'entregado', 'completada')
+    and o.store_id = new.store_id and o.status in ('enviado_o_listo', 'pendiente_confirmacion', 'entregado')
     for update;
-  if not found then raise exception 'El pedido aún no admite reclamos.'; end if;
-  if exists (select 1 from public.claims c where c.order_id = new.order_id and c.status in ('abierto', 'en_revision')) then
-    raise exception 'El pedido ya tiene un reclamo abierto.';
+  if not found then raise exception 'El pedido no admite reclamos nuevos.'; end if;
+  insert into public.pedidos_con_reclamo(order_id) values (new.order_id) on conflict do nothing;
+  if not found then
+    raise exception 'Ya presentaste un reclamo para este pedido.' using errcode = '23505';
   end if;
   return new;
 end $$;
@@ -403,7 +427,7 @@ alter policy claims_insert on public.claims with check (
   and resolution is null and resolution_note is null and resolved_by is null and resolved_at is null
   and exists (
     select 1 from public.orders o where o.id = order_id and o.buyer_id = auth.uid() and o.store_id = claims.store_id
-      and o.status in ('enviado_o_listo', 'pendiente_confirmacion', 'entregado', 'completada')
+      and o.status in ('enviado_o_listo', 'pendiente_confirmacion', 'entregado')
   )
 );
 alter policy requests_update on public.requests using (buyer_id = auth.uid() and public.cuenta_activa())
@@ -471,3 +495,414 @@ alter policy chat_img_leer on storage.objects using (
 );
 
 commit;
+
+-- Devolución vinculada al reclamo. Los cambios pasan por una sola transición auditada.
+create table if not exists public.claim_returns (
+  claim_id uuid primary key references public.claims(id),
+  estado text not null check (estado in ('ordenada','enviada','en_revision','recibida','cerrada')),
+  instrucciones text not null,
+  evidencia text,
+  nota text,
+  actualizado_en timestamptz not null default now()
+);
+alter table public.claim_returns add column if not exists modalidad text not null default 'devolucion';
+alter table public.claim_returns add column if not exists evidencia_tienda text;
+alter table public.claim_returns add column if not exists estado_previo text;
+alter table public.claim_returns drop constraint if exists claim_returns_modalidad_check;
+alter table public.claim_returns add constraint claim_returns_modalidad_check check (modalidad in ('devolucion','intercambio','compra'));
+alter table public.claim_returns drop constraint if exists claim_returns_estado_check;
+alter table public.claim_returns add constraint claim_returns_estado_check
+  check (estado in ('ordenada','enviada','en_revision','recibida','cerrada','por_cumplir','por_confirmar','confirmada'));
+alter table public.claim_returns enable row level security;
+revoke all on public.claim_returns from public, anon, authenticated;
+grant select on public.claim_returns to authenticated;
+
+-- Una sanción comercial no impide que la tienda termine una devolución.
+create or replace function public.tienda_gestiona_devolucion(p_tienda uuid)
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
+  select public.cuenta_activa() and exists (
+    select 1 from public.stores s where s.id = p_tienda and s.admin_baja_at is null and (
+      s.owner_id = auth.uid() or exists (
+        select 1 from public.store_members m where m.store_id = s.id and m.user_id = auth.uid()
+          and m.status = 'activo' and ('gestionar_pedidos' = any(m.extra_permissions) or exists (
+            select 1 from public.role_permissions p where p.role_code = m.role_code and p.permission_code = 'gestionar_pedidos'
+          ))
+      )
+    )
+  )
+$$;
+
+create or replace function public.puede_ver_reclamo(cid uuid)
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
+  select public.is_admin() or exists (
+    select 1 from public.claims c where c.id = cid and (
+      c.buyer_id = auth.uid() or c.store_id in (select public.tiendas_con_permiso('gestionar_pedidos'))
+      or (exists (select 1 from public.claim_returns d where d.claim_id = cid) and public.tienda_gestiona_devolucion(c.store_id))
+    )
+  )
+$$;
+
+drop policy if exists claim_returns_select on public.claim_returns;
+create policy claim_returns_select on public.claim_returns for select to authenticated using (public.puede_ver_reclamo(claim_id));
+
+-- Resolver y crear el seguimiento en la misma transacción.
+create or replace function public.resolver_reclamo_con_seguimiento(
+  p_id uuid, p_resolucion public.reclamo_resolucion, p_nota text, p_modalidad text
+)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare c public.claims; estado_pedido public.pedido_estado; nota text := btrim(p_nota);
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  if p_resolucion is null or coalesce(char_length(nota),0) not between 5 and 3000 then raise exception 'Indica la resolución y sus instrucciones.'; end if;
+  select o.status into estado_pedido from public.orders o where o.id = (select order_id from public.claims where id = p_id) for update;
+  select * into c from public.claims where id = p_id and status in ('abierto','en_revision') for update;
+  if not found or estado_pedido is null then raise exception 'El reclamo ya está cerrado o el pedido no existe.'; end if;
+  if p_resolucion = 'cerrado_sin_incumplimiento' then
+    if p_modalidad is not null or exists (select 1 from public.claim_returns where claim_id = p_id
+      and estado not in ('recibida','cerrada','confirmada')) then raise exception 'Cierra primero el seguimiento pendiente.'; end if;
+  else
+    if p_modalidad is null or p_modalidad not in ('compra','devolucion','intercambio')
+      or (p_resolucion = 'intercambio' and p_modalidad <> 'intercambio') then
+      raise exception 'Selecciona cómo se cumplirá la resolución.';
+    end if;
+    if estado_pedido = 'cancelada' or (p_modalidad <> 'compra' and estado_pedido not in ('entregado','completada')) then
+      raise exception 'Para devolver o cambiar el producto, el pedido debe constar como entregado.';
+    end if;
+    insert into public.claim_returns(claim_id, estado, instrucciones, modalidad)
+      values (p_id, case when p_modalidad = 'compra' then 'por_cumplir' else 'ordenada' end, nota, p_modalidad);
+  end if;
+  update public.claims set status = (case when p_resolucion = 'cerrado_sin_incumplimiento' then 'cerrado' else 'resuelto' end)::public.reclamo_estado,
+    resolution = p_resolucion, resolution_note = nota, resolved_by = auth.uid(), resolved_at = now() where id = p_id;
+  perform public.registrar_auditoria('revisar_reclamo','claims',p_id::text,
+    jsonb_build_object('resolucion',p_resolucion,'seguimiento',p_modalidad,'motivo',nota));
+end $$;
+
+create or replace function public.revisar_reclamo(p_id uuid, p_resolucion public.reclamo_resolucion, p_nota text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  if p_resolucion is not null then
+    perform public.resolver_reclamo_con_seguimiento(p_id,p_resolucion,p_nota,
+      case when p_resolucion = 'intercambio' then 'intercambio' end);
+    return;
+  end if;
+  update public.claims set status='en_revision' where id=p_id and status='abierto';
+  if not found then raise exception 'El reclamo ya fue cerrado o ya está en revisión.'; end if;
+  perform public.registrar_auditoria('revisar_reclamo','claims',p_id::text);
+end $$;
+revoke all on function public.resolver_reclamo_con_seguimiento(uuid,public.reclamo_resolucion,text,text) from public, anon;
+grant execute on function public.resolver_reclamo_con_seguimiento(uuid,public.reclamo_resolucion,text,text) to authenticated;
+
+create or replace function public.gestionar_devolucion(p_reclamo uuid, p_accion text, p_nota text default null, p_evidencia text default null)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  c public.claims;
+  d public.claim_returns;
+  siguiente text;
+  estado_pedido public.pedido_estado;
+  v_nota text := nullif(btrim(p_nota), '');
+  comprador boolean;
+  tienda boolean;
+  admin boolean := public.is_admin();
+begin
+  if auth.uid() is null or not public.cuenta_activa() then
+    raise exception 'Se requiere una cuenta activa.' using errcode = '42501';
+  end if;
+  if p_accion is null or p_accion not in ('ordenar','enviar','recibir','intervenir','reanudar','cerrar','cumplir','confirmar_cumplimiento') then
+    raise exception 'Acción de devolución no válida.';
+  end if;
+  select status into estado_pedido from public.orders where id = (select order_id from public.claims where id = p_reclamo) for update;
+  select * into c from public.claims where id = p_reclamo for update;
+  if not found then raise exception 'Reclamo no disponible.' using errcode = '42501'; end if;
+  comprador := c.buyer_id = auth.uid();
+  tienda := not comprador and public.tienda_gestiona_devolucion(c.store_id);
+  if not ((p_accion in ('ordenar','reanudar','cerrar') and admin)
+    or (p_accion in ('enviar','confirmar_cumplimiento') and comprador)
+    or (p_accion in ('recibir','cumplir') and tienda)
+    or (p_accion = 'intervenir' and (admin or comprador or tienda))) then
+    raise exception 'No tienes permiso para esta acción.' using errcode = '42501';
+  end if;
+  if (p_accion in ('ordenar','intervenir','reanudar','cerrar') and coalesce(char_length(v_nota), 0) < 5)
+    or coalesce(char_length(v_nota), 0) > 3000 then raise exception 'Escribe entre 5 y 3000 caracteres.'; end if;
+
+  select * into d from public.claim_returns where claim_id = c.id for update;
+  if p_accion = 'ordenar' then
+    if d.claim_id is not null then raise exception 'El reclamo ya tiene una devolución.'; end if;
+    if to_jsonb(c)->>'admin_archived_at' is not null then raise exception 'Recupera el reclamo desde Auditoría.'; end if;
+    if not exists (select 1 from public.orders o where o.id = c.order_id and o.status in ('entregado','completada')) then
+      raise exception 'Solo se puede ordenar la devolución de un producto entregado.';
+    end if;
+    if c.status <> 'resuelto' or c.resolution is null or c.resolution = 'cerrado_sin_incumplimiento' then
+      raise exception 'Ordena el seguimiento al resolver el reclamo.';
+    end if;
+    siguiente := 'ordenada';
+    insert into public.claim_returns(claim_id, estado, instrucciones, modalidad)
+      values (c.id, siguiente, v_nota, case when c.resolution = 'intercambio' then 'intercambio' else 'devolucion' end);
+  else
+    if d.claim_id is null or d.estado in ('recibida','cerrada','confirmada') then raise exception 'La devolución no está pendiente.'; end if;
+    case p_accion
+      when 'enviar' then
+        if d.estado <> 'ordenada' then raise exception 'La devolución no está pendiente de envío.'; end if;
+        if p_evidencia is null or split_part(p_evidencia,'/',1) <> 'devoluciones'
+          or split_part(p_evidencia,'/',2) <> c.id::text or split_part(p_evidencia,'/',3) <> auth.uid()::text
+          or not exists (select 1 from storage.objects where bucket_id = 'claim-evidence' and name = p_evidencia) then
+          raise exception 'Adjunta una evidencia de la devolución.';
+        end if;
+        siguiente := 'enviada';
+      when 'recibir' then
+        if d.estado <> 'enviada' then raise exception 'El comprador todavía no registró la devolución.'; end if;
+        siguiente := case when d.modalidad = 'intercambio' then 'por_cumplir' else 'recibida' end;
+      when 'cumplir' then
+        if d.estado <> 'por_cumplir' or estado_pedido not in ('entregado','completada') then
+          raise exception 'Primero registra la entrega del producto acordado.';
+        end if;
+        if p_evidencia is null or split_part(p_evidencia,'/',1) <> 'devoluciones'
+          or split_part(p_evidencia,'/',2) <> c.id::text or split_part(p_evidencia,'/',3) <> auth.uid()::text
+          or not exists (select 1 from storage.objects where bucket_id = 'claim-evidence' and name = p_evidencia) then
+          raise exception 'Adjunta la evidencia de entrega.';
+        end if;
+        siguiente := 'por_confirmar';
+      when 'confirmar_cumplimiento' then
+        if d.estado <> 'por_confirmar' or c.status not in ('resuelto','cerrado') then raise exception 'El seguimiento aún no se puede confirmar.'; end if;
+        siguiente := 'confirmada';
+      when 'intervenir' then
+        if d.estado not in ('ordenada','enviada','por_cumplir','por_confirmar') then raise exception 'La devolución ya está en revisión.'; end if;
+        siguiente := 'en_revision';
+      when 'reanudar' then
+        if d.estado <> 'en_revision' then raise exception 'La devolución no está en revisión.'; end if;
+        siguiente := coalesce(d.estado_previo, case when d.evidencia is null then 'ordenada' else 'enviada' end);
+      when 'cerrar' then siguiente := 'cerrada';
+    end case;
+    update public.claim_returns set estado = siguiente, actualizado_en = now(),
+      evidencia = case when p_accion = 'enviar' then p_evidencia else d.evidencia end,
+      evidencia_tienda = case when p_accion = 'cumplir' then p_evidencia else d.evidencia_tienda end,
+      estado_previo = case when p_accion = 'intervenir' then d.estado else null end,
+      nota = coalesce(v_nota, d.nota)
+      where claim_id = c.id;
+    if siguiente = 'confirmada' and estado_pedido = 'entregado' then
+      perform public.completar_pedido(c.order_id);
+    elsif siguiente = 'recibida' and estado_pedido = 'entregado' then
+      update public.orders set status = 'cancelada' where id = c.order_id;
+      insert into public.delivery_events(order_id,event,from_status,to_status,actor_id)
+        values(c.order_id,'estado','entregado','cancelada',auth.uid());
+    end if;
+  end if;
+  perform public.registrar_auditoria('devolucion_' || p_accion, 'reclamo', c.id::text,
+    jsonb_build_object('anterior', d.estado, 'nuevo', siguiente, 'motivo', v_nota));
+end $$;
+
+alter policy reclamo_subir on storage.objects with check (
+  bucket_id = 'claim-evidence' and (
+    exists (select 1 from public.claims c
+      where c.id = public.try_uuid((storage.foldername(name))[1]) and c.status in ('abierto', 'en_revision'))
+    or ((storage.foldername(name))[1] = 'cancelaciones'
+      and (storage.foldername(name))[3] = auth.uid()::text
+      and public.puede_adjuntar_cancelacion(public.try_uuid((storage.foldername(name))[2])))
+    or ((storage.foldername(name))[1] = 'devoluciones' and (storage.foldername(name))[3] = auth.uid()::text
+      and exists (
+        select 1 from public.claim_returns d join public.claims c on c.id = d.claim_id
+        where d.claim_id = public.try_uuid((storage.foldername(name))[2])
+          and ((d.estado = 'ordenada' and c.buyer_id = auth.uid())
+            or (d.estado = 'por_cumplir' and c.buyer_id <> auth.uid() and public.tienda_gestiona_devolucion(c.store_id)))
+      ))
+  )
+);
+alter policy reclamo_leer on storage.objects using (
+  bucket_id = 'claim-evidence' and (
+    public.puede_ver_reclamo(public.try_uuid((storage.foldername(name))[1]))
+    or ((storage.foldername(name))[1] = 'cancelaciones' and exists (
+      select 1 from public.cancellations c where c.id = public.try_uuid((storage.foldername(name))[2])
+    ))
+    or ((storage.foldername(name))[1] = 'devoluciones' and exists (
+      select 1 from public.claim_returns d
+        where d.claim_id = public.try_uuid((storage.foldername(name))[2]) and name in (d.evidencia,d.evidencia_tienda)
+    ))
+  )
+);
+
+-- Reporte de entrega y confirmaciones individuales del pedido.
+create table if not exists public.order_close_control (
+  order_id uuid primary key references public.orders(id) on delete cascade,
+  reporte text check (reporte in ('pendiente','aceptado','rechazado')),
+  evidencia text,
+  nota_reporte text,
+  decision_entrega text,
+  comprador_confirmo_at timestamptz,
+  tienda_confirmo_at timestamptz,
+  intervencion text,
+  cierre_admin text
+);
+alter table public.order_close_control enable row level security;
+revoke all on public.order_close_control from public, anon, authenticated;
+grant select on public.order_close_control to authenticated;
+drop policy if exists order_close_control_select on public.order_close_control;
+create policy order_close_control_select on public.order_close_control for select to authenticated
+  using (public.puede_ver_pedido(order_id));
+
+create or replace function public.ofertas_tienda_con_reclamo(p_ids uuid[])
+returns setof uuid language sql stable security definer set search_path = public, pg_temp as $$
+  select f.id from public.offers f
+  where f.id = any(p_ids)
+    and (f.store_id in (select public.tiendas_con_permiso('enviar_ofertas'))
+      or exists (select 1 from public.requests r where r.id = f.request_id and r.buyer_id = auth.uid()))
+    and exists (
+      select 1 from public.offer_history v
+      join public.orders p on p.offer_version_id = v.id
+      where v.offer_id=f.id and (
+        exists (select 1 from public.order_close_control a where a.order_id=p.id and a.reporte='pendiente')
+        or exists (
+          select 1 from public.claims c left join public.claim_returns d on d.claim_id=c.id
+          where c.order_id=p.id and (c.status in ('abierto','en_revision')
+            or d.estado not in ('recibida','cerrada','confirmada')
+            or (d.claim_id is null and c.resolution in ('intercambio','acuerdo_partes','sancion')))
+        )
+      )
+    )
+$$;
+
+revoke all on function public.gestionar_devolucion(uuid,text,text,text), public.ofertas_tienda_con_reclamo(uuid[]) from public, anon;
+revoke all on function public.tienda_gestiona_devolucion(uuid) from public, anon;
+grant execute on function public.tienda_gestiona_devolucion(uuid) to authenticated;
+grant execute on function public.gestionar_devolucion(uuid,text,text,text), public.ofertas_tienda_con_reclamo(uuid[]) to authenticated;
+
+create or replace function public.pedido_tiene_caso_pendiente(p_order uuid)
+returns boolean language sql stable security definer set search_path = public, pg_temp as $$
+  select exists (
+    select 1 from public.claims c left join public.claim_returns d on d.claim_id=c.id
+    where c.order_id=p_order and (c.status in ('abierto','en_revision')
+      or d.estado not in ('recibida','cerrada','confirmada')
+      or (d.claim_id is null and c.resolution in ('intercambio','acuerdo_partes','sancion')))
+  )
+$$;
+revoke all on function public.pedido_tiene_caso_pendiente(uuid) from public, anon, authenticated;
+
+create or replace function public.impedir_cierre_con_seguimiento()
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if new.status is not distinct from old.status then return new; end if;
+  if new.status in ('entregado','completada','cancelada') and exists (
+    select 1 from public.order_close_control a where a.order_id=old.id and a.reporte='pendiente'
+  ) then raise exception 'Administración debe resolver el reporte de entrega sin código.'; end if;
+  if new.status in ('completada','cancelada') and public.pedido_tiene_caso_pendiente(old.id) then
+    raise exception 'Primero completa los pasos del reclamo o de su seguimiento.';
+  end if;
+  if new.status='completada' and not exists (
+    select 1 from public.order_close_control a where a.order_id=old.id
+      and (a.cierre_admin is not null or (a.comprador_confirmo_at is not null and a.tienda_confirmo_at is not null))
+  ) then raise exception 'Se requieren las dos confirmaciones o un cierre administrativo.'; end if;
+  return new;
+end $$;
+
+drop trigger if exists impedir_cierre_con_seguimiento on public.orders;
+create trigger impedir_cierre_con_seguimiento before update of status on public.orders
+for each row execute function public.impedir_cierre_con_seguimiento();
+revoke all on function public.impedir_cierre_con_seguimiento() from public, anon, authenticated;
+
+create or replace function public.gestionar_cierre_pedido(
+  p_order uuid, p_accion text, p_nota text default null, p_evidencia text default null
+) returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  o public.orders;
+  a public.order_close_control;
+  actor uuid := auth.uid();
+  es_admin boolean := public.is_admin();
+  comprador boolean;
+  tienda boolean;
+  v_nota text := nullif(btrim(p_nota),'');
+begin
+  if actor is null or not public.cuenta_activa() then raise exception 'Se requiere una cuenta activa.' using errcode='42501'; end if;
+  select * into o from public.orders where id=p_order for update;
+  if not found then raise exception 'No se encontró el pedido.'; end if;
+  comprador := o.buyer_id=actor;
+  tienda := not comprador and public.tienda_gestiona_devolucion(o.store_id);
+  if p_accion is null or not (
+    (p_accion in ('reportar','confirmar_tienda') and tienda)
+    or (p_accion='confirmar_comprador' and comprador)
+    or (p_accion='intervenir' and (comprador or tienda))
+    or (p_accion in ('validar_entrega','rechazar_entrega','cerrar_admin') and es_admin)
+  ) then raise exception 'No tienes permiso para esta acción.' using errcode='42501'; end if;
+  if (p_accion in ('reportar','intervenir','validar_entrega','rechazar_entrega','cerrar_admin') and coalesce(char_length(v_nota),0)<5)
+    or coalesce(char_length(v_nota),0)>3000 then raise exception 'Escribe el motivo (entre 5 y 3000 caracteres).'; end if;
+
+  insert into public.order_close_control(order_id) values(o.id) on conflict do nothing;
+  select * into a from public.order_close_control where order_id=o.id for update;
+
+  if p_accion='reportar' then
+    if o.status not in ('enviado_o_listo','pendiente_confirmacion') or a.reporte='pendiente' then
+      raise exception 'El pedido no admite otro reporte de entrega en este momento.';
+    end if;
+    if p_evidencia is null or split_part(p_evidencia,'/',1)<>'entregas-sin-codigo'
+      or split_part(p_evidencia,'/',2)<>o.id::text or split_part(p_evidencia,'/',3)<>actor::text
+      or not exists (select 1 from storage.objects where bucket_id='claim-evidence' and name=p_evidencia)
+      then raise exception 'Adjunta un comprobante de entrega.'; end if;
+    update public.order_close_control set reporte='pendiente', evidencia=p_evidencia, nota_reporte=v_nota, decision_entrega=null where order_id=o.id;
+  elsif p_accion in ('validar_entrega','rechazar_entrega') then
+    if a.reporte is distinct from 'pendiente' or o.status not in ('enviado_o_listo','pendiente_confirmacion') then raise exception 'No hay un reporte de entrega pendiente.'; end if;
+    update public.order_close_control set reporte=case when p_accion='validar_entrega' then 'aceptado' else 'rechazado' end,
+      decision_entrega=v_nota where order_id=o.id;
+    if p_accion='validar_entrega' then
+      update public.orders set status='entregado' where id=o.id;
+      insert into public.delivery_events(order_id,event,from_status,to_status,actor_id) values(o.id,'estado',o.status,'entregado',actor);
+    end if;
+  else
+    if o.status<>'entregado' or a.reporte='pendiente' then raise exception 'La entrega debe estar confirmada antes del cierre.'; end if;
+    if p_accion='intervenir' then
+      update public.order_close_control set intervencion=v_nota where order_id=o.id;
+    else
+      if public.pedido_tiene_caso_pendiente(o.id) then raise exception 'Primero completa los pasos del reclamo o de su seguimiento.'; end if;
+      if p_accion='cerrar_admin' then
+        update public.order_close_control set cierre_admin=v_nota where order_id=o.id returning * into a;
+      else
+        update public.order_close_control set
+          comprador_confirmo_at=case when comprador then coalesce(comprador_confirmo_at,now()) else comprador_confirmo_at end,
+          tienda_confirmo_at=case when tienda then coalesce(tienda_confirmo_at,now()) else tienda_confirmo_at end
+          where order_id=o.id returning * into a;
+      end if;
+      if a.cierre_admin is not null or (a.comprador_confirmo_at is not null and a.tienda_confirmo_at is not null) then
+        update public.orders set status='completada' where id=o.id;
+        insert into public.delivery_events(order_id,event,from_status,to_status,actor_id) values(o.id,'estado','entregado','completada',actor);
+        insert into public.notifications(user_id,type,title,body,payload)
+          select destino.usuario,'pedido_estado','Operación completada',
+            case when a.cierre_admin is not null then 'Administración cerró la operación.' else 'Ambas partes confirmaron el cierre.' end,
+            jsonb_build_object('order_id',o.id,'request_id',o.request_id,'para',destino.rol)
+          from (select o.buyer_id as usuario,'comprador' as rol
+            union all select q.u,'vendedor' from public.usuarios_con_permiso(o.store_id,'gestionar_pedidos') as q(u)) destino;
+      end if;
+    end if;
+  end if;
+  perform public.registrar_auditoria('pedido_' || p_accion,'orders',o.id::text,
+    jsonb_build_object('motivo',v_nota,'evidencia',p_evidencia));
+end $$;
+
+create or replace function public.completar_pedido(p_order uuid)
+returns void language sql security definer set search_path = public, pg_temp as $$
+  select public.gestionar_cierre_pedido(p_order,'confirmar_comprador')
+$$;
+
+create or replace function public.reiniciar_confirmaciones_por_reclamo()
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update public.order_close_control set comprador_confirmo_at=null, tienda_confirmo_at=null where order_id=new.order_id;
+  return new;
+end $$;
+drop trigger if exists reiniciar_confirmaciones_por_reclamo on public.claims;
+create trigger reiniciar_confirmaciones_por_reclamo after insert on public.claims
+for each row execute function public.reiniciar_confirmaciones_por_reclamo();
+
+drop policy if exists entrega_sin_codigo_subir on storage.objects;
+create policy entrega_sin_codigo_subir on storage.objects for insert to authenticated with check (
+  bucket_id='claim-evidence' and (storage.foldername(name))[1]='entregas-sin-codigo'
+  and (storage.foldername(name))[3]=auth.uid()::text and exists (
+    select 1 from public.orders o where o.id=public.try_uuid((storage.foldername(name))[2])
+      and o.status in ('enviado_o_listo','pendiente_confirmacion') and o.buyer_id<>auth.uid()
+      and public.tienda_gestiona_devolucion(o.store_id)
+  )
+);
+drop policy if exists entrega_sin_codigo_leer on storage.objects;
+create policy entrega_sin_codigo_leer on storage.objects for select to authenticated using (
+  bucket_id='claim-evidence' and (storage.foldername(name))[1]='entregas-sin-codigo'
+  and exists (select 1 from public.order_close_control a where a.order_id=public.try_uuid((storage.foldername(name))[2]) and a.evidencia=name)
+);
+revoke all on function public.gestionar_cierre_pedido(uuid,text,text,text) from public, anon;
+grant execute on function public.gestionar_cierre_pedido(uuid,text,text,text) to authenticated;
+revoke all on function public.reiniciar_confirmaciones_por_reclamo() from public, anon, authenticated;

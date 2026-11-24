@@ -1,4 +1,6 @@
-import { useState } from "react";
+import useOfertasConCaso from "./useOfertasConCaso";
+import { useState, type ReactNode } from "react";
+import { AccionHistorial, SeleccionHistorial, useHistorialPersonal } from "@/features/comprador/HistorialPersonal";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cargarReputacion, textoReputacion, type Reputacion } from "@/features/reputacion/reputacion";
@@ -19,8 +21,9 @@ type Datos = {
   ofertas: Oferta[]; reputaciones: Map<string, Reputacion>; urls: Map<string, string>;
 };
 
-function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
+function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado, accion }: {
   o: Oferta; datos: Datos; puedeElegir: boolean; ocupado: boolean; onElegir: (version: Version, modo: "domicilio" | "recojo") => void;
+  accion?: ReactNode;
 }) {
   const versiones = ordenarVersiones(o.offer_history);
   const vigente = versionVigente(versiones, o.status, o.current_version_id);
@@ -44,7 +47,10 @@ function TarjetaOferta({ o, datos, puedeElegir, onElegir, ocupado }: {
         <div className="space-y-1 text-right">
           <p className="text-3xl font-extrabold text-pino">{soles(vigente.price)}</p>
           <p className="text-sm font-semibold">{dif >= 0 ? `${soles(dif)} bajo tu presupuesto` : `${soles(-dif)} sobre tu presupuesto${datos.solicitud.budget_negotiable ? " (negociable)" : ""}`}</p>
-          <span className={`inline-block rounded-full px-3 py-0.5 text-sm font-bold ${e.clase}`}>{e.texto}</span>
+          <div className="flex items-center justify-end gap-2">
+            <span className={`inline-block rounded-full px-3 py-0.5 text-sm font-bold ${e.clase}`}>{e.texto}</span>
+            {accion}
+          </div>
         </div>
       </div>
       <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
@@ -155,6 +161,9 @@ export default function OfertasSolicitud({ desdeBandeja = false }: { desdeBandej
     onError: (e) => { setMensaje({ texto: e instanceof Error ? e.message : "Error", error: true }); refrescar(); },
   });
 
+  const historial = useHistorialPersonal("ofertas");
+  const casos = useOfertasConCaso((consulta.data?.ofertas ?? []).map((o) => o.id));
+  const sePuedeQuitar = (id: string) => casos.isSuccess && !casos.data.has(id);
   const volver = <p><Link to={desdeBandeja ? "/comprador/ofertas-recibidas" : "/comprador/mis-solicitudes"} className="font-bold text-mercado underline">← {desdeBandeja ? "Ofertas recibidas" : "Mis solicitudes"}</Link></p>;
   if (consulta.isLoading) return <p className="text-suave">Cargando…</p>;
   const d = consulta.data;
@@ -162,13 +171,14 @@ export default function OfertasSolicitud({ desdeBandeja = false }: { desdeBandej
 
   const s = d.solicitud;
   const e = etiquetaSolicitud[s.status];
-  const activas = d.ofertas.filter((o) => o.status === "enviada").sort((a, b) => {
+  const activas = d.ofertas.filter((o) => o.status === "enviada" && historial.visible(o.id)).sort((a, b) => {
     const pa = a.offer_history.find((v) => v.id === a.current_version_id)?.price ?? Infinity;
     const pb = b.offer_history.find((v) => v.id === b.current_version_id)?.price ?? Infinity;
     return pa - pb;
   });
   const elegida = d.ofertas.find((o) => o.status === "aceptada");
-  const otras = d.ofertas.filter((o) => o.status === "rechazada");
+  const otras = d.ofertas.filter((o) => o.status === "rechazada" && historial.visible(o.id));
+  const elegidaVisible = elegida && (historial.visible(elegida.id) || casos.data?.has(elegida.id)) ? elegida : null;
   const pendiente = elegida ? propuestaPendiente(elegida.offer_history, elegida.status) : null;
   const vigenteElegida = elegida ? versionVigente(elegida.offer_history, elegida.status, elegida.current_version_id) : null;
   const mejor = activas[0]?.id;
@@ -182,6 +192,14 @@ export default function OfertasSolicitud({ desdeBandeja = false }: { desdeBandej
       </div>
       <p className="text-suave">Tu presupuesto máximo: {soles(s.max_budget)}{s.budget_negotiable ? " (negociable)" : ""}</p>
       {mensaje && <p role={mensaje.error ? "alert" : "status"} className={`rounded-lg p-3 text-sm ${mensaje.error ? "border border-error/40 bg-white font-semibold text-error" : "bg-maiz-suave"}`}>{mensaje.texto}</p>}
+      <SeleccionHistorial historial={historial} ids={[
+        ...(elegidaVisible ? [elegidaVisible.id] : []), ...(s.status === "con_ofertas" ? activas.map((o) => o.id) : []), ...otras.map((o) => o.id),
+      ].filter(sePuedeQuitar)} />
+
+      {elegida && casos.data?.has(elegida.id) && <p className="rounded-lg bg-maiz-suave p-3 text-sm">
+        Hay un reclamo o una devolución pendiente. Podrás quitar la oferta cuando se cierren.
+      </p>}
+      {casos.isError && <p role="alert" className="text-sm text-error">No se pudo comprobar si las ofertas tienen casos pendientes.</p>}
 
       {pendiente && elegida && (
         <section className="space-y-2 rounded-xl border-2 border-maiz bg-maiz-suave p-4" aria-live="polite">
@@ -195,11 +213,11 @@ export default function OfertasSolicitud({ desdeBandeja = false }: { desdeBandej
         </section>
       )}
 
-      {elegida && (
+      {elegidaVisible && (
         <section className="space-y-2">
           <h3 className="font-display text-xl font-bold text-pino">Oferta elegida</h3>
-          <ul><TarjetaOferta o={elegida} datos={d} puedeElegir={false} ocupado={false} onElegir={() => undefined} /></ul>
-          <Link to="/comprador/chat" className="inline-flex min-h-11 items-center rounded-lg bg-mercado px-4 font-bold text-white hover:bg-pino">Abrir el chat con {elegida.stores?.name}</Link>
+          <ul><TarjetaOferta o={elegidaVisible} datos={d} puedeElegir={false} ocupado={false} onElegir={() => undefined} accion={sePuedeQuitar(elegidaVisible.id) ? <AccionHistorial historial={historial} id={elegidaVisible.id} /> : undefined} /></ul>
+          <Link to="/comprador/chat" className="inline-flex min-h-11 items-center rounded-lg bg-mercado px-4 font-bold text-white hover:bg-pino">Abrir el chat con {elegidaVisible.stores?.name}</Link>
           <Link to="/comprador/mis-compras" className="ml-2 inline-flex min-h-11 items-center rounded-lg border-2 border-mercado px-4 font-bold text-mercado hover:bg-hoja">Ver mi compra</Link>
         </section>
       )}
@@ -211,19 +229,19 @@ export default function OfertasSolicitud({ desdeBandeja = false }: { desdeBandej
             {activas.map((o) => (
               <div key={o.id} className="space-y-1">
                 {o.id === mejor && activas.length > 1 && <p className="w-fit rounded-full bg-maiz px-3 py-0.5 text-sm font-extrabold">Mejor precio</p>}
-                <ul><TarjetaOferta o={o} datos={d} puedeElegir ocupado={elegir.isPending} onElegir={(version, modo) => elegir.mutate({ version, modo })} /></ul>
+                <ul><TarjetaOferta o={o} datos={d} puedeElegir ocupado={elegir.isPending} onElegir={(version, modo) => elegir.mutate({ version, modo })} accion={sePuedeQuitar(o.id) ? <AccionHistorial historial={historial} id={o.id} /> : undefined} /></ul>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      {!elegida && activas.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">Aún no hay ofertas para esta solicitud. Te avisaremos cuando llegue la primera.</p>}
+      {!elegidaVisible && activas.length === 0 && otras.length === 0 && <p className="rounded-xl bg-white p-6 text-suave">No hay ofertas visibles para esta solicitud.</p>}
 
       {otras.length > 0 && (
         <details>
           <summary className="cursor-pointer font-bold">Otras ofertas recibidas ({otras.length})</summary>
-          <ul className="mt-2 space-y-3">{otras.map((o) => <TarjetaOferta key={o.id} o={o} datos={d} puedeElegir={false} ocupado={false} onElegir={() => undefined} />)}</ul>
+          <ul className="mt-2 space-y-3">{otras.map((o) => <TarjetaOferta key={o.id} o={o} datos={d} puedeElegir={false} ocupado={false} onElegir={() => undefined} accion={sePuedeQuitar(o.id) ? <AccionHistorial historial={historial} id={o.id} /> : undefined} />)}</ul>
         </details>
       )}
     </div>

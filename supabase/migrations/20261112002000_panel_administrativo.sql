@@ -118,12 +118,15 @@ where not p.is_admin and p.status in ('suspendido', 'bloqueado') and not exists 
   select 1 from public.sanctions s where s.user_id = p.id and s.source_type = 'otro' and s.source_id = p.id and s.ends_at is null
 );
 
+alter table public.profiles add column if not exists admin_baja_at timestamptz;
+alter table public.stores add column if not exists admin_baja_at timestamptz;
+
 create or replace function public.reactivar_por_apelacion() returns trigger
 language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if new.source_type = 'otro' and new.source_id = new.user_id and new.ends_at is null
     and new.appeal_status = 'aceptada' and old.appeal_status = 'pendiente' then
-    update public.profiles set status = 'activo' where id = new.user_id and not is_admin
+    update public.profiles set status = 'activo' where id = new.user_id and not is_admin and admin_baja_at is null
       and status = case when new.type = 'bloqueo' then 'bloqueado' else 'suspendido' end::public.cuenta_estado;
   end if;
   return new;
@@ -186,6 +189,7 @@ language sql immutable set search_path = public, pg_temp as $$
       and not exists (select 1 from public.requests q where q.category_id = r.id)'),
     ('claims', 'r.status in (''resuelto'', ''cerrado'') and r.resolution is distinct from ''sancion''
       and not exists (select 1 from public.claim_evidence e where e.claim_id = r.id)
+      and not exists (select 1 from public.claim_returns d where d.claim_id = r.id)
       and not exists (select 1 from public.sanctions s where s.source_type = ''reclamo'' and s.source_id = r.id)'),
     ('cancellations', 'r.review_status = ''justificada'' and cardinality(r.evidence_paths) = 0
       and not exists (select 1 from public.sanctions s where s.source_type = ''cancelacion'' and s.source_id = r.id)'),
@@ -198,10 +202,11 @@ language sql immutable set search_path = public, pg_temp as $$
       and not exists (select 1 from public.offers o where o.request_id = r.id)
       and not exists (select 1 from public.request_images i where i.request_id = r.id)'),
     ('offers', 'r.status in (''rechazada'', ''reemplazada'', ''retirada'')
+      and not exists (select 1 from public.orders o where o.request_id = r.request_id)
       and not exists (select 1 from public.requests q where q.selected_offer_id = r.id)
       and not exists (select 1 from public.conversations c where c.offer_id = r.id)
       and not exists (select 1 from public.offer_history h where h.offer_id = r.id)'),
-    ('orders', 'r.status in (''completada'', ''cancelada'')
+    ('orders', 'r.status = ''cancelada''
       and not exists (select 1 from public.claims c where c.order_id = r.id)
       and not exists (select 1 from public.cancellations c where c.order_id = r.id)
       and not exists (select 1 from public.conversations c where c.order_id = r.id)
@@ -255,6 +260,51 @@ returns boolean language sql stable set search_path = public, pg_temp as $$
   )
 $$;
 
+-- El archivo administrativo conserva las negociaciones ligadas a una venta completada.
+create or replace function public.admin_venta_archivable(p_solicitud uuid)
+returns boolean language sql stable set search_path = public, pg_temp as $$
+  select exists (select 1 from public.orders where request_id = p_solicitud and status = 'completada')
+    and not exists (
+      select 1 from public.orders o where o.request_id = p_solicitud and (
+        o.status <> 'completada' or exists (select 1 from public.claims c where c.order_id = o.id)
+        or exists (select 1 from public.cancellations c where c.order_id = o.id)
+      )
+    )
+    and not exists (select 1 from public.cancellations c where c.request_id = p_solicitud)
+$$;
+
+create or replace function public.admin_regla_archivo(p_tabla text)
+returns text language sql immutable set search_path = public, pg_temp as $$
+  select case p_tabla
+    when 'cancellations' then 'public.admin_cancelacion_archivable(r.id)'
+    when 'requests' then 'r.status = ''atendida'' and public.admin_venta_archivable(r.id)'
+    when 'offers' then 'r.status in (''aceptada'', ''rechazada'', ''reemplazada'', ''retirada'')
+      and public.admin_venta_archivable(r.request_id)'
+    when 'orders' then 'r.status = ''completada'' and public.admin_venta_archivable(r.request_id)'
+  end
+$$;
+
+create or replace function public.admin_archivar_ventas(p_tabla text, p_ids uuid[])
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare condicion text; cantidad integer;
+begin
+  if p_tabla is null or p_tabla not in ('requests', 'offers', 'orders') or not public.is_admin() then
+    raise exception 'Se requiere acceso administrativo.' using errcode = '42501';
+  end if;
+  if coalesce(cardinality(p_ids), 0) not between 1 and 1000 then raise exception 'Selecciona entre 1 y 1000 registros.'; end if;
+  condicion := public.admin_regla_archivo(p_tabla);
+  execute format('update public.%I r set admin_archived_at = now()
+    where r.id = any($1) and r.admin_archived_at is null and (%s)', p_tabla, condicion) using p_ids;
+  get diagnostics cantidad = row_count;
+  if cantidad > 0 then
+    perform public.registrar_auditoria('archivar_resueltos', p_tabla, null, jsonb_build_object('cantidad', cantidad, 'modo', 'conservar_historial'));
+  end if;
+  return cantidad;
+end $$;
+revoke execute on function public.admin_venta_archivable(uuid), public.admin_regla_archivo(text),
+  public.admin_archivar_ventas(text, uuid[]) from public, anon, authenticated;
+grant execute on function public.admin_archivar_ventas(text, uuid[]) to authenticated;
+
 create or replace function public.admin_acciones_papelera(p_tabla text, p_ids uuid[])
 returns table (id uuid, accion text)
 language plpgsql stable security definer set search_path = public, pg_temp as $$
@@ -266,7 +316,7 @@ begin
   return query execute format('select r.id, case when (%s) then ''eliminar''::text else ''archivar''::text end
     from public.%I r where r.id = any($1) and r.admin_archived_at is null and ((%s) or (%s))',
     condicion, p_tabla, condicion,
-    case when p_tabla = 'cancellations' then 'public.admin_cancelacion_archivable(r.id)' else 'false' end)
+    coalesce(public.admin_regla_archivo(p_tabla), 'false'))
     using p_ids;
 end $$;
 
@@ -357,9 +407,11 @@ begin
     'select %L::text as tabla, r.id, coalesce(nullif(d.datos->>''name'', ''''), nullif(d.datos->>''title'', ''''),
       nullif(d.datos->>''description'', ''''), nullif(d.datos->>''reason'', ''''), nullif(d.datos->>''decision'', ''''),
       nullif(d.datos->>''reason_text'', ''''), r.id::text) as titulo, r.admin_archived_at as archivado_en,
-      coalesce(%L = ''cancellations'' and d.datos->>''review_status'' = ''injustificada'', false) as conservar
+      coalesce((%L = ''cancellations'' and d.datos->>''review_status'' = ''injustificada'')
+        or (%L = ''orders'' and d.datos->>''status'' = ''completada'')
+        or (%L in (''requests'', ''offers'') and not (%s)), false) as conservar
       from public.%I r cross join lateral (select to_jsonb(r) as datos) d where r.admin_archived_at is not null',
-    regla.tabla, regla.tabla, regla.tabla), ' union all ')
+    regla.tabla, regla.tabla, regla.tabla, regla.tabla, regla.elegible, regla.tabla), ' union all ')
     into consulta from public.admin_reglas_papelera() regla where p_tabla is null or regla.tabla = p_tabla;
   if consulta is null then raise exception 'Esta sección no admite papelera.'; end if;
   return query execute 'select * from (' || consulta || ') p order by archivado_en desc, tabla, id limit 26 offset $1' using p_offset;
@@ -528,9 +580,9 @@ begin
         ('7', 'Cancelaciones denunciadas', (select count(*)::text from public.cancellations where review_status='denunciada'), null),
         ('8', 'Denuncias de calificaciones pendientes', (select count(*)::text from public.rating_reports where status='pendiente'), null)
     $resumen$
-    when 'usuarios' then 'select id, coalesce(nullif(full_name, ''''), ''Usuario''), status::text, created_at from public.profiles'
+    when 'usuarios' then 'select id, coalesce(nullif(full_name, ''''), ''Usuario''), status::text, created_at from public.profiles where admin_baja_at is null'
     when 'identidad' then 'select id, ''Verificación de identidad''::text, status::text, submitted_at from public.identity_verifications'
-    when 'tiendas' then 'select id, name, status::text, created_at from public.stores'
+    when 'tiendas' then 'select id, name, status::text, created_at from public.stores where admin_baja_at is null'
     when 'categorias' then 'select id, name, case when active then ''activa'' else ''desactivada'' end, created_at from public.categories where admin_archived_at is null'
     when 'productos' then 'select id, name, case when admin_hidden then ''retirado'' else status::text end, created_at from public.products where status <> ''eliminado'''
     when 'solicitudes' then 'select id, title, status::text, created_at from public.requests where admin_archived_at is null'
@@ -561,4 +613,216 @@ grant execute on function public.admin_equipo(), public.admin_invitar(text, text
   public.mi_acceso_administrativo(), public.aceptar_invitacion_admin(uuid), public.admin_consultar_delegado(text, integer)
 to authenticated;
 
+-- Visibilidad personal del historial del comprador.
+create table if not exists public.comprador_ocultos (
+  usuario uuid not null references public.profiles(id) on delete cascade,
+  seccion text not null,
+  registro uuid not null,
+  primary key (usuario, seccion, registro)
+);
+alter table public.comprador_ocultos enable row level security;
+revoke all on public.comprador_ocultos from public, anon, authenticated;
+grant select on public.comprador_ocultos to authenticated;
+drop policy if exists comprador_ocultos_propios on public.comprador_ocultos;
+create policy comprador_ocultos_propios on public.comprador_ocultos for select to authenticated using (usuario = auth.uid());
+
+-- El listado y el tacho comparten la misma regla de elegibilidad.
+create or replace function public.pedidos_ocultables(p_seccion text, p_ids uuid[])
+returns setof uuid language sql stable security definer set search_path = public, pg_temp as $$
+  select o.id from public.orders o
+  where o.id = any(p_ids) and public.cuenta_activa()
+    and not exists (select 1 from public.order_close_control a where a.order_id=o.id and a.reporte='pendiente')
+    and ((p_seccion = 'compras' and o.buyer_id = auth.uid())
+      or (p_seccion = 'pedidos_tienda' and o.store_id in (select public.tiendas_con_permiso('gestionar_pedidos'))))
+    and (o.status in ('completada','cancelada') or exists (
+      select 1 from public.claims c where c.order_id = o.id and c.status in ('resuelto','cerrado')
+    ))
+    and not exists (
+      select 1 from public.claims c left join public.claim_returns d on d.claim_id = c.id
+      where c.order_id = o.id and (
+        c.status in ('abierto','en_revision')
+        or d.estado not in ('recibida','cerrada','confirmada')
+        or (d.claim_id is null and c.resolution in ('intercambio','acuerdo_partes','sancion'))
+      )
+    )
+$$;
+revoke all on function public.pedidos_ocultables(text,uuid[]) from public, anon;
+grant execute on function public.pedidos_ocultables(text,uuid[]) to authenticated;
+
+create or replace function public.ocultar_historial_comprador(p_seccion text, p_ids uuid[])
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare usuario_actual uuid := auth.uid(); consulta text; cantidad integer;
+begin
+  if usuario_actual is null or not public.cuenta_activa() then
+    raise exception 'Se requiere una cuenta activa.' using errcode = '42501';
+  end if;
+  if coalesce(cardinality(p_ids), 0) not between 1 and 1000 then raise exception 'Selecciona entre 1 y 1000 registros.'; end if;
+  consulta := case p_seccion
+    when 'solicitudes' then 'select id from public.requests where buyer_id=$1 and status in (''atendida'',''vencida'',''cancelada'')'
+    when 'bandeja_ofertas' then 'select r.id from public.requests r where r.buyer_id=$1 and exists (select 1 from public.offers o where o.request_id=r.id)'
+    when 'ofertas' then 'select o.id from public.offers o join public.requests r on r.id=o.request_id where r.buyer_id=$1 and o.id not in (select public.ofertas_tienda_con_reclamo($3))'
+    when 'compras' then 'select public.pedidos_ocultables($2,$3) as id'
+    when 'pedidos_tienda' then 'select public.pedidos_ocultables($2,$3) as id'
+    when 'ofertas_tienda' then 'select f.id from public.offers f
+      where f.id = any($3) and f.store_id in (select public.tiendas_con_permiso(''enviar_ofertas''))
+        and f.id not in (select public.ofertas_tienda_con_reclamo($3))'
+    when 'chat_tienda' then 'select id from public.conversations
+      where store_id in (select public.tiendas_con_permiso(''chat''))'
+    when 'chat' then 'select id from public.conversations where buyer_id=$1'
+    when 'reclamo' then 'select id from public.claims where buyer_id=$1 and status in (''resuelto'',''cerrado'')
+      and not exists (select 1 from public.claim_returns d where d.claim_id=claims.id and d.estado not in (''recibida'',''cerrada'',''confirmada''))'
+    when 'reclamos_tienda' then 'select c.id from public.claims c where c.buyer_id<>$1
+      and public.tienda_gestiona_devolucion(c.store_id) and c.status in (''resuelto'',''cerrado'')
+      and not exists (select 1 from public.claim_returns d where d.claim_id=c.id and d.estado not in (''recibida'',''cerrada'',''confirmada''))'
+    when 'cancelacion' then 'select c.id from public.cancellations c left join public.orders o on o.id=c.order_id
+      left join public.requests r on r.id=c.request_id where coalesce(o.buyer_id,r.buyer_id)=$1 and c.review_status in (''justificada'',''injustificada'')'
+    when 'sancion' then 'select id from public.sanctions where user_id=$1 and store_id is null
+      and (revoked_at is not null or appeal_status=''aceptada'' or ends_at<=now())'
+    when 'calificaciones' then 'select id from public.ratings where (rater_id=$1 and rater_role=''comprador'')
+      or (rated_id=$1 and rater_role=''vendedor'')'
+  end;
+  if consulta is null then raise exception 'Sección no válida.'; end if;
+  execute 'insert into public.comprador_ocultos(usuario,seccion,registro)
+    select $1,$2,x.id from (' || consulta || ') x where x.id=any($3) on conflict do nothing'
+    using usuario_actual, p_seccion, p_ids;
+  get diagnostics cantidad = row_count;
+
+  if p_seccion in ('compras', 'pedidos_tienda') then
+    with finalizados as (
+      select p.id, p.request_id, p.store_id from public.orders p
+      where p.status = 'completada' and p.id in (select public.pedidos_ocultables(p_seccion, p_ids))
+    ), vinculados as (
+      select 'solicitudes' as seccion, request_id as registro from finalizados where p_seccion = 'compras'
+      union all
+      select 'bandeja_ofertas', request_id from finalizados where p_seccion = 'compras'
+      union all
+      select case when p_seccion = 'compras' then 'ofertas' else 'ofertas_tienda' end, f.id
+      from finalizados p join public.offers f on f.request_id = p.request_id
+        and (p_seccion = 'compras' or f.store_id = p.store_id)
+      where f.id not in (select public.ofertas_tienda_con_reclamo(array[f.id]))
+      union all
+      select case when p_seccion = 'compras' then 'chat' else 'chat_tienda' end, c.id
+      from finalizados p join public.conversations c on c.request_id = p.request_id
+        and (p_seccion = 'compras' or c.store_id = p.store_id)
+    )
+    insert into public.comprador_ocultos(usuario, seccion, registro)
+    select usuario_actual, seccion, registro from vinculados on conflict do nothing;
+  end if;
+  return cantidad;
+end $$;
+
+revoke execute on function public.ocultar_historial_comprador(text, uuid[]) from public, anon;
+grant execute on function public.ocultar_historial_comprador(text, uuid[]) to authenticated;
+
 commit;
+
+-- Resúmenes por lote para los listados del administrador titular.
+create or replace function public.admin_promedios_listado(p_seccion text, p_ids uuid[])
+returns table (id uuid, promedio numeric, total bigint)
+language plpgsql stable security definer set search_path = public, pg_temp as $$
+begin
+  if not public.is_admin() or not public.cuenta_activa() then
+    raise exception 'Se requiere acceso administrativo.' using errcode = '42501';
+  end if;
+  if coalesce(cardinality(p_ids), 0) > 1000 then raise exception 'Demasiados registros.'; end if;
+  if p_seccion = 'usuarios' then
+    return query select r.rated_id, round(avg(r.score), 2), count(*)
+    from public.ratings r
+    where r.rated_id = any(p_ids) and r.rater_role = 'vendedor' and r.status = 'visible'
+    group by r.rated_id;
+  elsif p_seccion = 'tiendas' then
+    return query select o.store_id, round(avg(r.score), 2), count(*)
+    from public.orders o join public.ratings r on r.order_id = o.id
+    where o.store_id = any(p_ids) and r.rater_role = 'comprador' and r.status = 'visible'
+    group by o.store_id;
+  else
+    raise exception 'Sección no válida.';
+  end if;
+end $$;
+revoke all on function public.admin_promedios_listado(text, uuid[]) from public, anon;
+grant execute on function public.admin_promedios_listado(text, uuid[]) to authenticated;
+
+-- La baja conserva las claves y los registros de operación.
+create or replace function public.proteger_baja_administrativa()
+returns trigger language plpgsql set search_path = public, pg_temp as $$
+begin
+  if old.admin_baja_at is not null and
+    (new.admin_baja_at is distinct from old.admin_baja_at or new.status is distinct from old.status) then
+    raise exception 'El registro está dado de baja.';
+  end if;
+  if new.admin_baja_at is distinct from old.admin_baja_at and current_user in ('anon', 'authenticated') then
+    raise exception 'La baja se registra mediante el panel administrativo.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+drop trigger if exists proteger_baja_administrativa on public.profiles;
+create trigger proteger_baja_administrativa before update on public.profiles
+for each row execute function public.proteger_baja_administrativa();
+drop trigger if exists proteger_baja_administrativa on public.stores;
+create trigger proteger_baja_administrativa before update on public.stores
+for each row execute function public.proteger_baja_administrativa();
+
+create or replace function public.admin_dar_baja_usuario(p_id uuid, p_motivo text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare anterior public.cuenta_estado;
+begin
+  if not public.is_admin() or not public.cuenta_activa() then
+    raise exception 'Se requiere acceso administrativo.' using errcode = '42501';
+  end if;
+  if coalesce(char_length(btrim(p_motivo)), 0) not between 5 and 3000 then raise exception 'Escribe el motivo de la baja.'; end if;
+  select p.status into anterior from public.profiles p
+    where p.id = p_id and not p.is_admin and p.admin_baja_at is null for update;
+  if not found then raise exception 'La cuenta ya fue dada de baja o está protegida.'; end if;
+  if exists (select 1 from public.admin_invitaciones where usuario_id = p_id and estado = 'activa') then
+    raise exception 'Revoca primero el acceso administrativo delegado de esta cuenta.';
+  end if;
+
+  update auth.users set email = null, email_change = '', banned_until = 'infinity'
+    where id = p_id;
+  delete from auth.sessions where user_id = p_id;
+  delete from auth.identities where user_id = p_id;
+
+  update public.identity_verifications set status = 'rechazado', rejection_reason = 'Cuenta dada de baja.',
+    reviewed_by = auth.uid(), reviewed_at = now() where user_id = p_id and status <> 'rechazado';
+  update public.profiles set status = 'bloqueado', email = null, admin_baja_at = now() where id = p_id;
+  perform public.registrar_auditoria('dar_baja_usuario', 'profiles', p_id::text,
+    jsonb_build_object('anterior', anterior, 'nuevo', 'baja', 'motivo', btrim(p_motivo)));
+end $$;
+
+create or replace function public.admin_dar_baja_tienda(p_id uuid, p_motivo text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare anterior public.tienda_estado;
+begin
+  if not public.is_admin() or not public.cuenta_activa() then
+    raise exception 'Se requiere acceso administrativo.' using errcode = '42501';
+  end if;
+  if coalesce(char_length(btrim(p_motivo)), 0) not between 5 and 3000 then raise exception 'Escribe el motivo de la baja.'; end if;
+  select s.status into anterior from public.stores s where s.id = p_id and s.admin_baja_at is null for update;
+  if not found then raise exception 'La tienda ya fue dada de baja o no existe.'; end if;
+  update public.stores set status = 'inactiva', business_id = null, rejection_reason = btrim(p_motivo),
+    admin_baja_at = now() where id = p_id;
+  perform public.registrar_auditoria('dar_baja_tienda', 'stores', p_id::text,
+    jsonb_build_object('anterior', anterior, 'nuevo', 'baja', 'motivo', btrim(p_motivo)));
+end $$;
+revoke all on function public.admin_dar_baja_usuario(uuid, text), public.admin_dar_baja_tienda(uuid, text) from public, anon;
+grant execute on function public.admin_dar_baja_usuario(uuid, text), public.admin_dar_baja_tienda(uuid, text) to authenticated;
+
+-- Abrir el chat desde la oferta recupera la visibilidad personal de la conversación.
+create or replace function public.restaurar_chat_desde_oferta(p_oferta uuid)
+returns uuid language plpgsql security definer set search_path = public, pg_temp as $$
+declare conversacion uuid;
+begin
+  select c.id into conversacion
+  from public.conversations c
+  join public.offers o on o.id = c.offer_id and o.store_id = c.store_id
+  where o.id = p_oferta and c.store_id in (select public.tiendas_con_permiso('chat'))
+  order by c.created_at desc, c.id desc limit 1;
+  if conversacion is null then
+    raise exception 'No hay un chat disponible para esta oferta o no tienes permiso.' using errcode = '42501';
+  end if;
+  delete from public.comprador_ocultos
+  where usuario = auth.uid() and seccion = 'chat_tienda' and registro = conversacion;
+  return conversacion;
+end $$;
+revoke all on function public.restaurar_chat_desde_oferta(uuid) from public, anon;
+grant execute on function public.restaurar_chat_desde_oferta(uuid) to authenticated;
