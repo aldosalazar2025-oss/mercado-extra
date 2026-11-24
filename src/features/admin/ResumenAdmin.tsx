@@ -12,7 +12,7 @@ const indicadores = [
   ["pedidos", "Pedidos en curso", "Operaciones"],
   ["reclamos", "Reclamos por resolver", "Reclamos"],
   ["cancelaciones", "Cancelaciones denunciadas", "Cancelaciones"],
-  ["calificaciones", "Denuncias de calificaciones pendientes", "Reportes"],
+  ["calificaciones", "Denuncias de calificaciones pendientes", "Reputación"],
 ] as const;
 
 export default function ResumenAdmin() {

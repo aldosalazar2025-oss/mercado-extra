@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
+import FiltroEstado from "@/components/FiltroEstado";
+import { AccionesTarjeta, SeleccionPapelera, useAccionesPapelera, useSeleccionPapelera } from "@/features/admin/PapeleraAdmin";
+import type { ReactNode } from "react";
 import { rutaPedido } from "@/features/pedidos/tipos";
 import { supabase } from "@/lib/supabase";
 import { accion, etiqueta, motivos, resoluciones, tablaCasos, tiposReclamo, tiposSancion, useCasosMutation, useUid } from "./casos";
@@ -142,13 +145,16 @@ function SancionManual({ uid }: { uid: string }) {
   );
 }
 
-function FichaReclamo({ caso, rol, uid, puedeResponder }: { caso: Reclamo; rol: Rol; uid: string; puedeResponder: boolean }) {
+function FichaReclamo({ caso, rol, uid, puedeResponder, acciones }: { caso: Reclamo; rol: Rol; uid: string; puedeResponder: boolean; acciones?: ReactNode }) {
   const abierto = caso.status === "abierto" || caso.status === "en_revision";
   const revisar = useCasosMutation(async () => accion("revisar_reclamo", { p_id: caso.id, p_resolucion: null, p_nota: null }));
   const respuestas = [...caso.claim_responses].sort((a, b) => a.created_at.localeCompare(b.created_at));
   return (
     <article className="space-y-3 rounded-xl border border-borde bg-white p-4">
-      <h3 className="font-display text-lg font-bold text-pino">{tiposReclamo.find(([id]) => id === caso.type)?.[1] ?? etiqueta(caso.type)}</h3>
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-display text-lg font-bold text-pino">{tiposReclamo.find(([id]) => id === caso.type)?.[1] ?? etiqueta(caso.type)}</h3>
+        {acciones}
+      </div>
       <EstadoCaso estado={caso.status} creado={caso.created_at} resaltar={rol === "admin"} />
       <section className="space-y-1 rounded-lg border border-borde bg-white p-3">
         <h4 className="font-bold text-pino">Reclamo del comprador{caso.comprador?.full_name && ` · ${caso.comprador.full_name}`}</h4>
@@ -192,7 +198,7 @@ function FichaReclamo({ caso, rol, uid, puedeResponder }: { caso: Reclamo; rol: 
   );
 }
 
-function FichaCancelacion({ caso, rol, uid }: { caso: Cancelacion; rol: Rol; uid: string }) {
+function FichaCancelacion({ caso, rol, uid, acciones }: { caso: Cancelacion; rol: Rol; uid: string; acciones?: ReactNode }) {
   const autor = caso.cancelled_by === uid;
   const pendiente = caso.review_status === "denunciada";
   const abierta = caso.review_status === "sin_revision";
@@ -221,7 +227,10 @@ function FichaCancelacion({ caso, rol, uid }: { caso: Cancelacion; rol: Rol; uid
   });
   return (
     <article className="space-y-3 rounded-xl border border-borde bg-white p-4">
-      <h3 className="font-display text-lg font-bold text-pino">{caso.order_id ? "Cancelación de pedido" : "Cancelación de solicitud"} · {motivos.find(([id]) => id === caso.reason_code)?.[1] ?? etiqueta(caso.reason_code)}</h3>
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-display text-lg font-bold text-pino">{caso.order_id ? "Cancelación de pedido" : "Cancelación de solicitud"} · {motivos.find(([id]) => id === caso.reason_code)?.[1] ?? etiqueta(caso.reason_code)}</h3>
+        {acciones}
+      </div>
       <EstadoCaso estado={caso.review_status} creado={caso.created_at} resaltar={rol === "admin"} />
       <Detalles className={rol === "admin" ? "space-y-3 rounded-lg border border-borde p-3" : "space-y-3"}>
         {rol === "admin" && <summary className="cursor-pointer font-bold text-mercado">Consultar detalles de la cancelación</summary>}
@@ -278,17 +287,24 @@ function FichaCancelacion({ caso, rol, uid }: { caso: Cancelacion; rol: Rol; uid
   );
 }
 
-function FichaSancion({ caso, rol }: { caso: Sancion; rol: Rol }) {
-  const decidir = useCasosMutation(async (aceptar: boolean) => accion("revisar_apelacion", { p_id: caso.id, p_aceptada: aceptar }));
+function estadoSancion(caso: Sancion) {
   const ahora = Date.now();
-  const revocada = Boolean(caso.revoked_at || caso.appeal_status === "aceptada");
-  const vencida = Boolean(caso.ends_at && Date.parse(caso.ends_at) <= ahora);
-  const programada = Date.parse(caso.starts_at) > ahora;
-  const activa = !revocada && !vencida && !programada;
-  const estado = revocada ? "Revocada" : vencida ? "Vencida" : programada ? "Programada" : "Activa";
+  if (caso.revoked_at || caso.appeal_status === "aceptada") return "Revocada";
+  if (caso.ends_at && Date.parse(caso.ends_at) <= ahora) return "Vencida";
+  return Date.parse(caso.starts_at) > ahora ? "Programada" : "Activa";
+}
+
+function FichaSancion({ caso, rol, acciones }: { caso: Sancion; rol: Rol; acciones?: ReactNode }) {
+  const decidir = useCasosMutation(async (aceptar: boolean) => accion("revisar_apelacion", { p_id: caso.id, p_aceptada: aceptar }));
+  const estado = estadoSancion(caso);
+  const revocada = estado === "Revocada";
+  const activa = estado === "Activa";
   return (
     <article className="space-y-3 rounded-xl border border-borde bg-white p-4">
-      <h3 className="font-display text-lg font-bold capitalize text-pino">{etiqueta(caso.type)}</h3>
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-display text-lg font-bold capitalize text-pino">{etiqueta(caso.type)}</h3>
+        {acciones}
+      </div>
       <p className="text-sm font-bold">
         <span className={activa ? "text-amber-800" : "text-slate-600"}>{estado}</span>
         {" · "}{caso.store_id ? `Tienda${caso.tienda?.name ? ` · ${caso.tienda.name}` : ""}` : "Usuario"}
@@ -346,6 +362,11 @@ function FichaSancion({ caso, rol }: { caso: Sancion; rol: Rol }) {
 }
 
 type Clase = "reclamo" | "cancelacion" | "sancion";
+const filtrosCaso: Record<Clase, string[]> = {
+  reclamo: ["abierto", "en_revision", "resuelto", "cerrado"],
+  cancelacion: ["sin_revision", "denunciada", "justificada", "injustificada"],
+  sancion: ["activa", "vencida", "revocada", "programada"],
+};
 const select: Record<Clase, string> = {
   reclamo: "id,order_id,buyer_id,store_id,type,description,status,resolution,resolution_note,created_at,comprador:profiles!claims_buyer_id_fkey(full_name),tienda:stores!claims_store_id_fkey(name),claim_evidence(file_path),claim_responses(id,author_id,body,created_at)",
   cancelacion: "id,order_id,request_id,cancelled_by,reason_code,reason_text,review_status,report_text,response_text,review_note,evidence_paths,created_at",
@@ -354,6 +375,10 @@ const select: Record<Clase, string> = {
 
 export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigentes = false }: { clase: Clase; rol: Rol; pedido?: string; tiendas?: string[]; soloVigentes?: boolean }) {
   const uid = useUid();
+  const [filtroEstado, setFiltroEstado] = useState("");
+  const [filtroApelacion, setFiltroApelacion] = useState("");
+  const mostrarFiltros = rol === "admin" && !pedido;
+  const tabla = tablaCasos(clase);
   const tiendas = useQuery({
     queryKey: ["casos", uid, "tiendas-pedidos"],
     enabled: Boolean(uid && supabase && rol === "vendedor" && clase === "reclamo"),
@@ -364,7 +389,7 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
     },
   });
   const consulta = useQuery({
-    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas, soloVigentes],
+    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas, soloVigentes, filtroEstado, filtroApelacion],
     enabled: Boolean(uid && supabase),
     refetchInterval: clase === "sancion" ? 15_000 : false,
     queryFn: async () => {
@@ -376,7 +401,22 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
       if (rol === "admin" && clase === "sancion") {
         columnas += ",sancionado:profiles!sanctions_user_id_fkey(full_name)";
       }
-      const base = supabase!.from(tablaCasos(clase)).select(columnas);
+      const base = supabase!.from(tabla).select(columnas);
+      if (mostrarFiltros) base.is("admin_archived_at", null);
+      if (mostrarFiltros && clase !== "sancion" && filtroEstado) {
+        base.eq(clase === "reclamo" ? "status" : "review_status", filtroEstado);
+      }
+      if (mostrarFiltros && clase === "sancion") {
+        const ahora = new Date().toISOString();
+        if (filtroApelacion) base.eq("appeal_status", filtroApelacion);
+        if (filtroEstado === "revocada") base.or("revoked_at.not.is.null,appeal_status.eq.aceptada");
+        if (filtroEstado && filtroEstado !== "revocada") {
+          base.is("revoked_at", null).or("appeal_status.is.null,appeal_status.neq.aceptada");
+          if (filtroEstado === "activa") base.lte("starts_at", ahora).or(`ends_at.is.null,ends_at.gt.${ahora}`);
+          if (filtroEstado === "vencida") base.lte("ends_at", ahora);
+          if (filtroEstado === "programada") base.gt("starts_at", ahora).or(`ends_at.is.null,ends_at.gt.${ahora}`);
+        }
+      }
       if (pedido) base.eq("order_id", pedido);
       if (clase === "reclamo" && idsTiendas) base.in("store_id", idsTiendas);
       if (clase === "sancion" && soloVigentes) {
@@ -391,19 +431,27 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
     },
   });
 
+  const accionesPapelera = useAccionesPapelera(tabla, mostrarFiltros ? consulta.data?.map((caso) => caso.id) ?? [] : []);
+  const seleccion = useSeleccionPapelera(JSON.stringify([clase, filtroEstado, filtroApelacion]),
+    mostrarFiltros && (filtroEstado || filtroApelacion) ? consulta.data?.map((caso) => caso.id) ?? [] : []);
   if (!supabase) return <p className="text-suave">Conecta Supabase para consultar los casos.</p>;
-  if (consulta.isPending) return <p className="text-sm text-suave">Cargando…</p>;
-  if (consulta.isError) return <p role="alert" className="text-error">No se pudieron cargar los casos.</p>;
   return <div className="space-y-3">
+    {mostrarFiltros && <FiltroEstado estados={filtrosCaso[clase]} valor={filtroEstado} cambiar={setFiltroEstado} />}
+    {mostrarFiltros && clase === "sancion" && <FiltroEstado etiqueta="Estado de la apelación"
+      estados={["pendiente", "aceptada", "rechazada"]} valor={filtroApelacion} cambiar={setFiltroApelacion} />}
+    {mostrarFiltros && <SeleccionPapelera tabla={tabla} seleccion={seleccion} acciones={accionesPapelera} />}
     {clase === "sancion" && rol === "admin" && <SancionManual uid={uid} />}
-    {!consulta.data.length && !pedido && <p className="rounded-xl bg-white p-4 text-suave">Aún no hay registros.</p>}
-    {consulta.data.map((caso) => {
-    if (clase === "reclamo") {
-      const reclamo = caso as Reclamo;
-      const puedeResponder = rol === "vendedor" && Boolean(tiendas.data?.has(reclamo.store_id));
-      return <FichaReclamo key={caso.id} caso={reclamo} rol={rol} uid={uid} puedeResponder={puedeResponder} />;
-    }
-    if (clase === "cancelacion") return <FichaCancelacion key={caso.id} caso={caso as Cancelacion} rol={rol} uid={uid} />;
-    return <FichaSancion key={caso.id} caso={caso as Sancion} rol={rol} />;
-  })}</div>;
+    {consulta.isPending && <p className="text-sm text-suave">Cargando…</p>}
+    {consulta.isError && <p role="alert" className="text-error">No se pudieron cargar los casos.</p>}
+    {consulta.data?.length === 0 && !pedido && <p className="rounded-xl bg-white p-4 text-suave">No hay registros para este filtro.</p>}
+    {consulta.data?.map((caso) => {
+      const accionPapelera = accionesPapelera?.get(caso.id);
+      const acciones = mostrarFiltros && (accionPapelera || seleccion.visibles.includes(caso.id))
+        ? <AccionesTarjeta tabla={tabla} id={caso.id} seleccion={seleccion} accion={accionPapelera} /> : null;
+      if (clase === "reclamo") return <FichaReclamo key={caso.id} caso={caso as Reclamo} rol={rol} uid={uid} acciones={acciones}
+        puedeResponder={rol === "vendedor" && Boolean(tiendas.data?.has((caso as Reclamo).store_id))} />;
+      if (clase === "cancelacion") return <FichaCancelacion key={caso.id} caso={caso as Cancelacion} rol={rol} uid={uid} acciones={acciones} />;
+      return <FichaSancion key={caso.id} caso={caso as Sancion} rol={rol} acciones={acciones} />;
+    })}
+  </div>;
 }

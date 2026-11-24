@@ -11,7 +11,7 @@ export const paneles: Record<PanelId, { titulo: string; secciones: string[] }> =
   },
   admin: {
     titulo: "Panel administrativo",
-    secciones: ["Resumen general", "Usuarios", "Verificación de identidad", "Tiendas", "Categorías", "Productos", "Solicitudes", "Ofertas", "Operaciones", "Reclamos", "Cancelaciones", "Sanciones", "Promociones", "Planes comerciales", "Reportes", "Auditoría"],
+    secciones: ["Resumen general", "Usuarios", "Verificación de identidad", "Tiendas", "Categorías", "Productos", "Solicitudes", "Ofertas", "Operaciones", "Reclamos", "Cancelaciones", "Sanciones", "Promociones", "Planes comerciales", "Reputación", "Auditoría"],
   },
 };
 

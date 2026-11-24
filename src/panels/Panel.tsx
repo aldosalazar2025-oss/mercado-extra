@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import ResumenComprador from "@/features/comprador/ResumenComprador";
 import Cuenta from "@/features/identidad/Cuenta";
 import ReclamosVendedor from "@/features/vendedor/ReclamosVendedor";
@@ -33,14 +33,14 @@ function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
   if (panel === "admin" && seccion === "Promociones") return <SolicitudesComerciales tipo="promocion" admin />;
   if (panel === "vendedor" && seccion === "Promociones y planes") return <MonetizacionVendedor />;
   if (panel === "admin" && seccion === "Resumen general") return <ResumenAdmin />;
-  if (panel === "admin" && ["Usuarios", "Solicitudes", "Ofertas", "Operaciones", "Reportes", "Auditoría"].includes(seccion)) {
+  if (panel === "admin" && ["Usuarios", "Solicitudes", "Ofertas", "Operaciones", "Reputación", "Auditoría"].includes(seccion)) {
     return <RegistrosAdmin key={seccion} seccion={seccion} />;
   }
   if (panel === "admin" && seccion === "Verificación de identidad") return <AdminVerificaciones />;
   if (panel === "vendedor" && seccion === "Reclamos") return <ReclamosVendedor />;
-  if (seccion === "Reclamos") return <ListaCasos rol={panel} clase="reclamo" />;
-  if (seccion === "Cancelaciones") return <ListaCasos rol={panel} clase="cancelacion" />;
-  if (seccion === "Sanciones") return <ListaCasos rol={panel} clase="sancion" />;
+  if (seccion === "Reclamos") return <ListaCasos key="reclamos" rol={panel} clase="reclamo" />;
+  if (seccion === "Cancelaciones") return <ListaCasos key="cancelaciones" rol={panel} clase="cancelacion" />;
+  if (seccion === "Sanciones") return <ListaCasos key="sanciones" rol={panel} clase="sancion" />;
   if (panel === "admin" && seccion === "Tiendas") return <AdminTiendas />;
   if (panel === "comprador" && seccion === "Inicio") return <ResumenComprador />;
   if (panel === "comprador" && seccion === "Ofertas recibidas") return <MisSolicitudes key="ofertas-recibidas" soloOfertas />;
@@ -66,9 +66,20 @@ function contenidoDe(panel: PanelId, seccion: string): ReactNode | null {
 
 type Props = { panel: PanelId; seccion?: string; contenido?: ReactNode };
 
+const gruposAdmin = [
+  { nombre: "General", secciones: ["Resumen general"] },
+  { nombre: "Cuentas y catálogo", secciones: ["Usuarios", "Verificación de identidad", "Tiendas", "Categorías", "Productos"] },
+  { nombre: "Operaciones", secciones: ["Solicitudes", "Ofertas", "Operaciones"] },
+  { nombre: "Atención y moderación", secciones: ["Reclamos", "Cancelaciones", "Sanciones", "Reputación"] },
+  { nombre: "Monetización", secciones: ["Promociones", "Planes comerciales"] },
+  { nombre: "Control administrativo", secciones: ["Auditoría"] },
+];
+
 export default function Panel({ panel, seccion: seccionFija, contenido }: Props) {
   const { titulo, secciones: todas } = paneles[panel];
   const { seccion } = useParams();
+  const navegar = useNavigate();
+  const admin = panel === "admin";
   const misPermisos = useMisPermisos(panel === "vendedor");
   // En el panel de vendedor el menú solo muestra lo que la persona puede usar en alguna de sus tiendas.
   const visibles = (s: string) => {
@@ -77,7 +88,8 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
     return req === null || (misPermisos.data?.has(req) ?? false);
   };
   const secciones = todas.filter(visibles);
-  const pedida = seccionFija ?? todas.find((s) => slug(s) === seccion) ?? todas[0];
+  const rutaSeccion = panel === "admin" && seccion === "reportes" ? "reputacion" : seccion;
+  const pedida = seccionFija ?? todas.find((s) => slug(s) === rutaSeccion) ?? todas[0];
   const sinAcceso = panel === "vendedor" && !misPermisos.isLoading && !visibles(pedida);
   const actual = pedida;
   const verificaAcceso = panel === "vendedor" && Boolean(permisoSeccion[actual]);
@@ -90,10 +102,32 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
   );
 
   return (
-    <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 md:grid-cols-[240px_1fr]">
-      <nav aria-label={titulo} className="md:sticky md:top-20 md:max-h-[calc(100dvh-5.5rem)] md:self-start md:overflow-y-auto">
+    <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 md:grid-cols-[240px_minmax(0,1fr)]">
+      <nav aria-label={titulo} className={admin ? "md:self-start" : "md:sticky md:top-20 md:max-h-[calc(100dvh-5.5rem)] md:self-start md:overflow-y-auto"}>
         <p className="mb-2 font-display text-lg font-extrabold text-pino">{titulo}</p>
-        <ul className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:gap-1 md:overflow-visible">
+        {admin ? <>
+          <label className="block text-sm font-semibold md:hidden">Sección
+            <select className="mt-1 block min-h-11 w-full rounded-lg border border-borde bg-white px-3"
+              value={actual} onChange={(e) => void navegar(`/admin/${slug(e.target.value)}`)}>
+              {gruposAdmin.map((grupo) => <optgroup key={grupo.nombre} label={grupo.nombre}>
+                {grupo.secciones.map((s) => <option key={s}>{s}</option>)}
+              </optgroup>)}
+            </select>
+          </label>
+          <div className="hidden space-y-3 md:block">
+            {gruposAdmin.map((grupo) => <section key={grupo.nombre} aria-label={grupo.nombre}>
+              <p className="mb-1 px-3 text-xs font-semibold text-suave">{grupo.nombre}</p>
+              <ul className="space-y-1">
+                {grupo.secciones.map((s) => <li key={s}>
+                  <NavLink to={`/admin/${slug(s)}`} aria-current={s === actual ? "page" : undefined}
+                    className={`block rounded-lg px-3 py-2 font-bold ${s === actual ? "bg-mercado text-white" : "bg-white text-tinta hover:bg-hoja"}`}>
+                    {s}
+                  </NavLink>
+                </li>)}
+              </ul>
+            </section>)}
+          </div>
+        </> : <ul className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:gap-1 md:overflow-visible">
           {secciones.map((s) => (
             <li key={s} className="shrink-0">
               <NavLink
@@ -105,7 +139,7 @@ export default function Panel({ panel, seccion: seccionFija, contenido }: Props)
               </NavLink>
             </li>
           ))}
-        </ul>
+        </ul>}
       </nav>
 
       <main className="min-w-0 space-y-4">

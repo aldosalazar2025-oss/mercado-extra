@@ -2,6 +2,8 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Boton, { clasesBoton } from "@/components/Boton";
+import FiltroEstado from "@/components/FiltroEstado";
+import { AccionesTarjeta, PapeleraAuditoria, SeleccionPapelera, useAccionesPapelera, useSeleccionPapelera } from "./PapeleraAdmin";
 import { useAuth } from "@/features/auth/AuthContext";
 import { FormularioCaso } from "@/features/reclamos/FormularioCaso";
 import { accion } from "@/features/reclamos/casos";
@@ -33,6 +35,7 @@ const colorEstado: Record<string, string> = {
   entregado: "text-emerald-800",
   completada: "text-emerald-800",
   abierta: "text-amber-800",
+  pendiente: "text-amber-800",
   enviada: "text-amber-800",
   pendiente_confirmacion: "text-amber-800",
   con_ofertas: "text-blue-800",
@@ -67,6 +70,32 @@ function Dato({ rotulo, children, anchoCompleto = false }: { rotulo: string; chi
     </div>
   );
 }
+
+const registrosAuditados: Record<string, string> = {
+  profiles: "Cuenta de usuario",
+  claims: "Reclamo",
+  reclamo: "Reclamo",
+  cancellations: "Cancelación",
+  cancelacion: "Cancelación",
+  sanctions: "Sanción",
+  stores: "Tienda",
+  products: "Producto",
+  tienda: "Tienda",
+  usuario: "Cuenta de usuario",
+  rating_reports: "Denuncia de calificación",
+  conversations: "Conversación",
+  subscription_plans: "Plan comercial",
+  subscriptions: "Solicitud de plan comercial",
+  promotions: "Promoción",
+};
+
+const cambiosAuditados: Record<string, string> = {
+  activar: "Activó la solicitud",
+  rechazar: "Rechazó la solicitud",
+  pausar: "Pausó la promoción",
+  finalizar: "Finalizó el plan",
+  retirar: "Retiró la solicitud",
+};
 
 function DetalleOferta({ version }: { version: OfertaDetalle | null }) {
   return <>
@@ -154,7 +183,7 @@ const fichas: Record<string, Ficha> = {
       </div>
     </>,
   },
-  Reportes: {
+  Reputación: {
     tabla: "rating_reports",
     columnas: "id,reason,status,created_at,ratings(score,comment,status,order_id)",
     estados: ["pendiente", "aceptada", "rechazada"],
@@ -162,11 +191,17 @@ const fichas: Record<string, Ficha> = {
     detalle: (f) => {
       const rating = f.ratings as { score: number; comment: string | null; status: string; order_id: string } | null;
       return <>
-        <p className="whitespace-pre-wrap break-words"><strong>Motivo</strong> · {texto(f, "reason")}</p>
-        {rating && <>
-          <p className="whitespace-pre-wrap break-words"><strong>Calificación</strong> · {rating.score} de 5 · {rating.status}{rating.comment ? ` · ${rating.comment}` : ""}</p>
-          <Referencia seccion="operaciones" id={rating.order_id} nombre="Ver pedido" />
-        </>}
+        <DatosFicha titulo="Ver detalles de la denuncia">
+          <Dato rotulo="Motivo de la denuncia" anchoCompleto>{texto(f, "reason") || "Sin motivo registrado"}</Dato>
+          {rating && <>
+            <Dato rotulo="Puntuación">{rating.score} de 5</Dato>
+            <Dato rotulo="Estado de la calificación"><span className="capitalize">{etiqueta(rating.status)}</span></Dato>
+            <Dato rotulo="Comentario de la calificación" anchoCompleto>{rating.comment || "Sin comentario"}</Dato>
+            <Dato rotulo="Pedido relacionado" anchoCompleto>
+              <Referencia seccion="operaciones" id={rating.order_id} nombre="Ver pedido" comoBoton />
+            </Dato>
+          </>}
+        </DatosFicha>
         {f.status === "pendiente" && <FormularioCaso titulo="Resolver denuncia" opciones={[
           ["aceptar", "Aceptar y ocultar calificación"], ["rechazar", "Rechazar denuncia"],
         ]} confirmar ejecutar={(motivo, decision) => accion("admin_resolver_denuncia_calificacion", {
@@ -180,44 +215,83 @@ const fichas: Record<string, Ficha> = {
     columnas: "id,actor_id,action,entity,entity_id,metadata,created_at",
     buscar: { etiqueta: "Nombre de la acción", campo: () => "action" },
     titulo: (f) => <span className="capitalize">{etiqueta(f.action)}</span>,
-    detalle: (f) => <>
-      <p className="break-all">{texto(f, "entity")} · {texto(f, "entity_id") || "Sin referencia"}</p>
-      {f.actor_id && <Referencia seccion="usuarios" id={texto(f, "actor_id")} nombre="Ver cuenta que realizó la acción" />}
-      {typeof f.metadata === "object" && f.metadata !== null && "motivo" in f.metadata && (
-        <p className="whitespace-pre-wrap break-words">Motivo · {String(f.metadata.motivo)}</p>
-      )}
-    </>,
+    detalle: (f) => {
+      const actor = texto(f, "actor_id");
+      const entidad = texto(f, "entity");
+      const meta = f.metadata && typeof f.metadata === "object" ? f.metadata as Registro : null;
+      const cambio = meta ? texto(meta, "accion") : "";
+      return <DatosFicha titulo="Ver detalles de la acción">
+        <Dato rotulo="Quién realizó la acción" anchoCompleto>
+          <p>{texto(f, "nombre_actor") || (actor ? "Cuenta sin nombre disponible" : "Sin cuenta asociada")}</p>
+          {actor && <Referencia seccion="usuarios" id={actor} nombre="Ver cuenta que realizó la acción" comoBoton />}
+        </Dato>
+        <Dato rotulo="Registro afectado">{registrosAuditados[entidad] ?? etiqueta(entidad)}</Dato>
+        <Dato rotulo="Referencia del registro"><span className="break-all">{texto(f, "entity_id") || "Sin referencia"}</span></Dato>
+        <Dato rotulo="Qué cambió" anchoCompleto>
+          {meta?.anterior && meta.nuevo ? `Estado anterior: ${etiqueta(meta.anterior)}. Estado nuevo: ${etiqueta(meta.nuevo)}.`
+            : typeof meta?.aceptada === "boolean" ? (meta.aceptada ? "Aceptó la denuncia y ocultó la calificación." : "Rechazó la denuncia.")
+            : cambiosAuditados[cambio] ?? etiqueta(f.action)}
+        </Dato>
+        <Dato rotulo="Motivo registrado" anchoCompleto>{meta ? texto(meta, "motivo") || "No se registró un motivo en auditoría." : "No se registró un motivo en auditoría."}</Dato>
+      </DatosFicha>;
+    },
   },
 };
 
 const tamano = 20;
+const estadosEliminables: Record<string, readonly string[]> = {
+  requests: ["atendida", "vencida", "cancelada", "eliminada"],
+  offers: ["rechazada", "reemplazada", "retirada"],
+  orders: ["completada", "cancelada"],
+  rating_reports: ["aceptada", "rechazada"],
+};
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 
 export default function RegistrosAdmin({ seccion }: { seccion: string }) {
   const ficha = fichas[seccion];
-  const resaltaEstado = ["Solicitudes", "Ofertas", "Operaciones"].includes(seccion);
+  const reputacion = seccion === "Reputación";
+  const auditoria = seccion === "Auditoría";
+  const eliminables = estadosEliminables[ficha.tabla];
+  const resaltaEstado = Boolean(ficha.estados);
   const { session } = useAuth();
   const [parametros, setParametros] = useSearchParams();
   const id = parametros.get("id") ?? "";
   const [textoBusqueda, setTextoBusqueda] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [estado, setEstado] = useState(seccion === "Reportes" ? "pendiente" : "");
+  const [estado, setEstado] = useState(reputacion ? "pendiente" : "");
+  const [entidad, setEntidad] = useState("");
   const [pagina, setPagina] = useState(0);
+  const [papelera, setPapelera] = useState(false);
   const consulta = useQuery({
-    queryKey: ["admin", session?.user.id, ficha.tabla, id, busqueda, estado, pagina],
-    enabled: !id || uuid.test(id),
+    queryKey: ["admin", session?.user.id, ficha.tabla, id, busqueda, estado, entidad, pagina],
+    enabled: !papelera && (!id || uuid.test(id)),
     queryFn: async () => {
       if (!supabase) throw new Error("Sin conexión");
       const base = supabase.from(ficha.tabla).select(ficha.columnas);
       if (id) base.eq("id", id);
+      if (eliminables && !id) base.is("admin_archived_at", null);
       if (estado && !id) base.eq("status", estado);
-      if (busqueda && ficha.buscar && !id) base.ilike(ficha.buscar.campo(busqueda), `%${busqueda.replace(/[\\%_]/g, "\\$&")}%`);
+      if (auditoria && entidad && !id) base.in("entity", Object.keys(registrosAuditados).filter((clave) => registrosAuditados[clave] === entidad));
+      if (busqueda && ficha.buscar && !id) {
+        const termino = auditoria ? busqueda.replace(/\s+/g, "_") : busqueda;
+        base.ilike(ficha.buscar.campo(termino), `%${termino.replace(/[\\%_]/g, "\\$&")}%`);
+      }
       const inicio = id ? 0 : pagina * tamano;
       const { data, error } = await base.order("created_at", { ascending: false }).order("id")
         .range(inicio, inicio + tamano);
       if (error) throw error;
-      const filas = data as unknown as Registro[];
-      return { filas: filas.slice(0, tamano), siguiente: filas.length > tamano };
+      const registros = data as unknown as Registro[];
+      let filas = registros.slice(0, tamano);
+      if (auditoria) {
+        const actores = [...new Set(filas.map((fila) => texto(fila, "actor_id")).filter(Boolean))];
+        if (actores.length) {
+          const perfiles = await supabase.from("profiles").select("id,full_name").in("id", actores);
+          if (perfiles.error) throw perfiles.error;
+          const nombres = new Map(perfiles.data.map((perfil) => [perfil.id, perfil.full_name]));
+          filas = filas.map((fila) => ({ ...fila, nombre_actor: nombres.get(texto(fila, "actor_id")) }));
+        }
+      }
+      return { filas, siguiente: registros.length > tamano };
     },
   });
 
@@ -226,34 +300,55 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
     setBusqueda(textoBusqueda.trim());
     setPagina(0);
   }
+  const seleccion = useSeleccionPapelera(JSON.stringify([seccion, id, estado, pagina, busqueda]),
+    !id && eliminables && estado ? consulta.data?.filas.map((fila) => String(fila.id)) ?? [] : []);
+  const acciones = useAccionesPapelera(ficha.tabla, eliminables
+    ? consulta.data?.filas.filter((fila) => eliminables.includes(texto(fila, "status"))).map((fila) => String(fila.id)) ?? [] : []);
 
   return (
     <div className="space-y-4">
+      {auditoria && <label className="block max-w-xs text-sm font-bold">Vista de Auditoría
+        <select className="mt-1 block min-h-11 w-full rounded-lg border border-borde bg-white px-3"
+          value={papelera ? "papelera" : "actividad"} onChange={(e) => setPapelera(e.target.value === "papelera")}>
+          <option value="actividad">Historial de actividad</option>
+          <option value="papelera">Papelera</option>
+        </select>
+      </label>}
+      {papelera ? <PapeleraAuditoria /> : <>
       {id ? <div className="flex flex-wrap items-center gap-2">
         <Boton variante="contorno" onClick={() => { setParametros({}); setPagina(0); }}>Volver a todos los registros</Boton>
         {!uuid.test(id) && <p role="alert" className="text-error">La referencia no es válida.</p>}
       </div> : <div className="flex flex-wrap items-end gap-3">
-        {ficha.buscar && <form onSubmit={buscar} className="flex flex-wrap items-end gap-2">
-          <label className="text-sm font-bold">{ficha.buscar.etiqueta}
-            <input className="mt-1 block min-h-11 rounded-lg border border-borde bg-white px-3" value={textoBusqueda}
+        {ficha.buscar && <form onSubmit={buscar} className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+          <label className="min-w-40 flex-1 text-sm font-bold">{ficha.buscar.etiqueta}
+            <input className="mt-1 block min-h-11 w-full rounded-lg border border-borde bg-white px-3" value={textoBusqueda}
               maxLength={120} onChange={(e) => setTextoBusqueda(e.target.value)} />
           </label>
           <Boton type="submit" variante="contorno">Buscar</Boton>
         </form>}
-        {ficha.estados && <label className="text-sm font-bold">Estado
-          <select className="mt-1 block min-h-11 rounded-lg border border-borde bg-white px-3" value={estado}
-            onChange={(e) => { setEstado(e.target.value); setPagina(0); }}>
-            <option value="">Todos los estados</option>
-            {ficha.estados.map((valor) => <option key={valor} value={valor}>{etiqueta(valor)}</option>)}
+        {ficha.estados && <FiltroEstado estados={ficha.estados} valor={estado}
+          cambiar={(valor) => { setEstado(valor); setPagina(0); }} />}
+        {auditoria && <label className="text-sm font-bold">Registro afectado
+          <select className="mt-1 block min-h-11 rounded-lg border border-borde bg-white px-3" value={entidad}
+            onChange={(e) => { setEntidad(e.target.value); setPagina(0); }}>
+            <option value="">Todos los registros</option>
+            {[...new Set(Object.values(registrosAuditados))].sort((a, b) => a.localeCompare(b, "es"))
+              .map((valor) => <option key={valor}>{valor}</option>)}
           </select>
         </label>}
       </div>}
+      <SeleccionPapelera tabla={ficha.tabla} seleccion={seleccion} acciones={acciones} />
       {consulta.isLoading && <p className="text-suave">Cargando registros…</p>}
       {consulta.isError && <p role="alert" className="text-error">No se pudieron cargar los registros.</p>}
       {consulta.isSuccess && consulta.data.filas.length === 0 && <p className="rounded-xl bg-white p-4 text-suave">No hay registros para esta consulta.</p>}
-      <ul className="space-y-3">
+      <ul className={reputacion || auditoria ? "grid items-start gap-3 lg:grid-cols-2" : "space-y-3"}>
         {consulta.data?.filas.map((f) => <li key={f.id} className="space-y-2 rounded-xl border border-borde bg-white p-4">
-          <h2 className="break-words font-display text-lg font-bold text-pino">{ficha.titulo(f)}</h2>
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="min-w-0 break-words font-display text-lg font-bold text-pino">{ficha.titulo(f)}</h2>
+            {(acciones?.has(String(f.id)) || seleccion.visibles.includes(String(f.id))) &&
+              <AccionesTarjeta tabla={ficha.tabla} id={String(f.id)} seleccion={seleccion}
+                accion={acciones?.get(String(f.id))} />}
+          </div>
           <p className="text-sm text-suave">
             {f.status ? <>
               <span className={resaltaEstado ? `font-bold capitalize ${colorEstado[String(f.status)] ?? "text-slate-600"}` : "capitalize"}>
@@ -272,6 +367,7 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
         <span className="text-sm">Página {pagina + 1}</span>
         <Boton variante="contorno" disabled={!consulta.data?.siguiente} onClick={() => setPagina(pagina + 1)}>Siguiente</Boton>
       </nav>}
+      </>}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import Boton from "@/components/Boton";
+import FiltroEstado from "@/components/FiltroEstado";
 import Campo, { estiloInput } from "@/components/Campo";
 import { soles } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
@@ -15,7 +16,7 @@ export default function AdminProductos() {
   const cliente = useQueryClient();
   const [texto, setTexto] = useState("");
   const [buscado, setBuscado] = useState("");
-  const [solo, setSolo] = useState<"todos" | "retirados">("todos");
+  const [solo, setSolo] = useState<"" | "publicado" | "oculto" | "retirado">("");
   const [motivos, setMotivos] = useState<Record<string, string>>({});
   const [mensaje, setMensaje] = useState<string | null>(null);
 
@@ -25,7 +26,9 @@ export default function AdminProductos() {
       if (!supabase) return [];
       let q = supabase.from("products").select("id,name,price,status,admin_hidden,admin_hidden_reason,stores(name),categories(name)").neq("status", "eliminado");
       if (buscado) q = q.ilike("name", `%${buscado.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-      if (solo === "retirados") q = q.eq("admin_hidden", true);
+      if (solo === "retirado") q = q.eq("admin_hidden", true);
+      if (solo === "publicado") q = q.eq("admin_hidden", false).eq("status", "activo");
+      if (solo === "oculto") q = q.eq("admin_hidden", false).neq("status", "activo");
       const { data, error } = await q.order("created_at", { ascending: false }).limit(50);
       if (error) throw error;
       return (data ?? []) as unknown as Fila[];
@@ -49,14 +52,9 @@ export default function AdminProductos() {
 
   return (
     <div className="space-y-4">
-      <form onSubmit={buscar} className="grid gap-3 rounded-xl border border-borde bg-white p-4 sm:grid-cols-[1fr_200px_auto] sm:items-end">
+      <form onSubmit={buscar} className="grid gap-3 rounded-xl border border-borde bg-white p-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
         <Campo etiqueta="Buscar producto" value={texto} onChange={(e) => setTexto(e.target.value)} />
-        <Campo etiqueta="Mostrar" id="admin-prod-solo">
-          <select id="admin-prod-solo" className={estiloInput} value={solo} onChange={(e) => setSolo(e.target.value as typeof solo)}>
-            <option value="todos">Todos</option>
-            <option value="retirados">Solo retirados</option>
-          </select>
-        </Campo>
+        <FiltroEstado estados={["publicado", "oculto", "retirado"] as const} valor={solo} cambiar={setSolo} />
         <Boton type="submit" variante="secundario">Buscar</Boton>
       </form>
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}

@@ -1,12 +1,14 @@
 import { useState } from "react";
 import Boton from "@/components/Boton";
+import FiltroEstado from "@/components/FiltroEstado";
+import { EliminarRegistros, useAccionesPapelera } from "@/features/admin/PapeleraAdmin";
 import Campo, { estiloInput } from "@/components/Campo";
 import { accion, useCasosMutation } from "@/features/reclamos/casos";
 import { soles } from "@/lib/format";
 import { conexion, usePlanes, type Plan } from "./datos";
 import SolicitudesComerciales from "./SolicitudesComerciales";
 
-function EditorPlan({ plan }: { plan?: Plan }) {
+function EditorPlan({ plan, puedeEliminar }: { plan?: Plan; puedeEliminar?: boolean }) {
   const [nombre, setNombre] = useState(plan?.name ?? "");
   const [precio, setPrecio] = useState(plan ? String(plan.price_month) : "");
   const [maximo, setMaximo] = useState(String(plan?.max_promociones ?? 2));
@@ -22,7 +24,8 @@ function EditorPlan({ plan }: { plan?: Plan }) {
   });
 
   return (
-    <details className="rounded-xl border border-borde bg-white p-4">
+    <div className="flex items-start gap-2 rounded-xl border border-borde bg-white p-3">
+    <details className="min-w-0 flex-1 p-1">
       <summary className="cursor-pointer font-bold text-mercado">
         {plan ? `${plan.name} · ${soles(Number(plan.price_month))} al mes · ${plan.active ? "Disponible" : "Desactivado"}` : "Crear plan"}
       </summary>
@@ -49,17 +52,24 @@ function EditorPlan({ plan }: { plan?: Plan }) {
         {guardar.isSuccess && <p role="status" className="text-pino">Plan guardado.</p>}
       </form>
     </details>
+    {plan && puedeEliminar && <EliminarRegistros tabla="subscription_plans" ids={[plan.id]} plan={plan.name} />}
+    </div>
   );
 }
 
 export function AdminPlanes() {
   const planes = usePlanes(true);
+  const [estado, setEstado] = useState("");
+  const visibles = planes.data?.filter((plan) => !estado || plan.active === (estado === "activo"));
+  const acciones = useAccionesPapelera("subscription_plans", visibles?.filter((plan) => !plan.active).map((plan) => plan.id) ?? []);
   return (
     <div className="space-y-4">
       <EditorPlan />
+      <FiltroEstado etiqueta="Estado del catálogo de planes" estados={["activo", "desactivado"]} valor={estado} cambiar={setEstado} />
       {planes.isLoading && <p className="text-suave">Cargando planes…</p>}
       {planes.isError && <p role="alert" className="text-error">No se pudieron cargar los planes.</p>}
-      {planes.data?.map((plan) => <EditorPlan key={plan.id} plan={plan} />)}
+      {visibles?.length === 0 && <p className="text-sm text-suave">No hay planes para este filtro.</p>}
+      {visibles?.map((plan) => <EditorPlan key={plan.id} plan={plan} puedeEliminar={acciones?.get(plan.id) === "eliminar"} />)}
       <h2 className="font-display text-xl font-bold text-pino">Solicitudes de planes</h2>
       <p className="text-sm text-suave">Verifica el acuerdo con la tienda antes de activar un plan con precio. La plataforma no procesa el cobro.</p>
       <SolicitudesComerciales tipo="plan" admin />

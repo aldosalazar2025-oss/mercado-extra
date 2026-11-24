@@ -26,6 +26,7 @@ export function usePlanes(admin = false) {
     queryFn: async () => {
       const q = conexion().from("subscription_plans").select("id,name,price_month,max_promociones,active,medalla");
       if (!admin) q.eq("active", true);
+      else q.is("admin_archived_at", null);
       const { data, error } = await q.order("name").order("id");
       if (error) throw error;
       return (data ?? []) as Plan[];
@@ -35,10 +36,10 @@ export function usePlanes(admin = false) {
 
 const limite = 20;
 
-export function useSolicitudesComerciales<T extends "plan" | "promocion">(tipo: T, tienda?: string, pagina = 0, admin = false) {
+export function useSolicitudesComerciales<T extends "plan" | "promocion">(tipo: T, tienda?: string, pagina = 0, admin = false, estado = "") {
   const { session } = useAuth();
   return useQuery({
-    queryKey: ["monetizacion", session?.user.id, tipo, admin, tienda, pagina],
+    queryKey: ["monetizacion", session?.user.id, tipo, admin, tienda, pagina, estado],
     enabled: Boolean(admin || tienda),
     refetchInterval: (consulta) =>
       !admin && consulta.state.data?.filas.some((fila) => fila.status === "pendiente") ? 15_000 : false,
@@ -47,6 +48,13 @@ export function useSolicitudesComerciales<T extends "plan" | "promocion">(tipo: 
         ? conexion().from("subscriptions").select("id,status,ends_at,precio_acordado,decision,subscription_plans(name),stores(name)")
         : conexion().from("promotions").select("id,status,ends_at,dias,decision,products(name),stores(name)");
       if (tienda) q.eq("store_id", tienda);
+      if (admin) q.is("admin_archived_at", null);
+      const ahora = new Date().toISOString();
+      if (estado === "vencida") q.or(`status.eq.vencida,and(status.eq.activa,ends_at.lte.${ahora})`);
+      else if (estado) {
+        q.eq("status", estado);
+        if (estado === "activa") q.or(`ends_at.is.null,ends_at.gt.${ahora}`);
+      }
       const { data, error } = await q.order(tipo === "plan" ? "starts_at" : "created_at", { ascending: false }).order("id").range(pagina * limite, (pagina + 1) * limite);
       if (error) throw error;
       return { filas: (data ?? []).slice(0, limite) as unknown as (T extends "plan" ? SolicitudPlan : Promocion)[], siguiente: (data?.length ?? 0) > limite };

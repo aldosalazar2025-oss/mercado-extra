@@ -134,4 +134,251 @@ create policy cuenta_activa_storage on storage.objects as restrictive for all to
 revoke execute on function public.reactivar_por_apelacion(), public.impedir_operaciones_cuenta_restringida()
 from public, anon, authenticated;
 
+-- Papelera administrativa. Solo admite registros terminales sin dependencias protegidas.
+create or replace function public.admin_reglas_papelera()
+returns table (tabla text, elegible text)
+language sql immutable set search_path = public, pg_temp as $$
+  values
+    ('rating_reports', 'r.status in (''aceptada'', ''rechazada'')'),
+    ('promotions', 'r.status::text in (''rechazada'', ''pausada'', ''vencida'') or (r.status = ''activa'' and r.ends_at <= now())'),
+    ('subscriptions', 'r.status::text in (''cancelada'', ''vencida'') or (r.status = ''activa'' and r.ends_at <= now())'),
+    ('subscription_plans', 'not r.active and not exists (select 1 from public.subscriptions s where s.plan_id = r.id)'),
+    ('categories', 'not r.active
+      and not exists (select 1 from public.categories c where c.parent_id = r.id)
+      and not exists (select 1 from public.products p where p.category_id = r.id)
+      and not exists (select 1 from public.store_categories s where s.category_id = r.id)
+      and not exists (select 1 from public.requests q where q.category_id = r.id)'),
+    ('claims', 'r.status in (''resuelto'', ''cerrado'') and r.resolution is distinct from ''sancion''
+      and not exists (select 1 from public.claim_evidence e where e.claim_id = r.id)
+      and not exists (select 1 from public.sanctions s where s.source_type = ''reclamo'' and s.source_id = r.id)'),
+    ('cancellations', 'r.review_status = ''justificada'' and cardinality(r.evidence_paths) = 0
+      and not exists (select 1 from public.sanctions s where s.source_type = ''cancelacion'' and s.source_id = r.id)'),
+    ('sanctions', 'r.source_id is null and r.appeal_status is distinct from ''pendiente''
+      and (r.revoked_at is not null or r.appeal_status = ''aceptada'' or r.ends_at <= now())'),
+    ('requests', 'r.status in (''atendida'', ''vencida'', ''cancelada'', ''eliminada'') and r.selected_offer_id is null
+      and not exists (select 1 from public.orders o where o.request_id = r.id)
+      and not exists (select 1 from public.cancellations c where c.request_id = r.id)
+      and not exists (select 1 from public.conversations c where c.request_id = r.id)
+      and not exists (select 1 from public.offers o where o.request_id = r.id)
+      and not exists (select 1 from public.request_images i where i.request_id = r.id)'),
+    ('offers', 'r.status in (''rechazada'', ''reemplazada'', ''retirada'')
+      and not exists (select 1 from public.requests q where q.selected_offer_id = r.id)
+      and not exists (select 1 from public.conversations c where c.offer_id = r.id)
+      and not exists (select 1 from public.offer_history h where h.offer_id = r.id)'),
+    ('orders', 'r.status in (''completada'', ''cancelada'')
+      and not exists (select 1 from public.claims c where c.order_id = r.id)
+      and not exists (select 1 from public.cancellations c where c.order_id = r.id)
+      and not exists (select 1 from public.conversations c where c.order_id = r.id)
+      and not exists (select 1 from public.ratings c where c.order_id = r.id)
+      and not exists (select 1 from public.delivery_evidence e where e.order_id = r.id)')
+$$;
+
+do $$
+declare regla record;
+begin
+  for regla in select * from public.admin_reglas_papelera() loop
+    execute format('alter table public.%I add column if not exists admin_archived_at timestamptz', regla.tabla);
+    execute format('create index if not exists %I on public.%I (admin_archived_at) where admin_archived_at is not null',
+      regla.tabla || '_admin_archived_idx', regla.tabla);
+    -- Las tablas con UPDATE directo requieren impedir que un cliente ajuste la fecha de purga.
+    execute format('drop trigger if exists proteger_papelera_admin on public.%I', regla.tabla);
+  end loop;
+end $$;
+
+create or replace function public.proteger_papelera_admin() returns trigger
+language plpgsql set search_path = public, pg_temp as $$
+begin
+  if current_user in ('authenticated', 'anon') and (
+    (tg_op = 'INSERT' and new.admin_archived_at is not null)
+    or (tg_op = 'UPDATE' and new.admin_archived_at is distinct from old.admin_archived_at)
+  ) then
+    raise exception 'La fecha de archivo se gestiona desde la papelera administrativa.' using errcode = '42501';
+  end if;
+  if tg_table_name in ('subscription_plans', 'categories') and new.admin_archived_at is not null
+    and (to_jsonb(new)->>'active')::boolean then
+    raise exception 'Recupera el registro desde Auditoría antes de activarlo.';
+  end if;
+  return new;
+end $$;
+
+do $$
+declare regla record;
+begin
+  for regla in select * from public.admin_reglas_papelera() loop
+    execute format('create trigger proteger_papelera_admin before insert or update on public.%I
+      for each row execute function public.proteger_papelera_admin()', regla.tabla);
+  end loop;
+end $$;
+
+create or replace function public.admin_cancelacion_archivable(p_id uuid)
+returns boolean language sql stable set search_path = public, pg_temp as $$
+  select exists (
+    select 1 from public.cancellations c join public.sanctions s
+      on s.source_type = 'cancelacion' and s.source_id = c.id
+    where c.id = p_id and c.review_status = 'injustificada'
+  )
+$$;
+
+create or replace function public.admin_acciones_papelera(p_tabla text, p_ids uuid[])
+returns table (id uuid, accion text)
+language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare condicion text;
+begin
+  if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  select elegible into condicion from public.admin_reglas_papelera() where tabla = p_tabla;
+  if condicion is null then raise exception 'Esta sección no admite papelera.'; end if;
+  return query execute format('select r.id, case when (%s) then ''eliminar''::text else ''archivar''::text end
+    from public.%I r where r.id = any($1) and r.admin_archived_at is null and ((%s) or (%s))',
+    condicion, p_tabla, condicion,
+    case when p_tabla = 'cancellations' then 'public.admin_cancelacion_archivable(r.id)' else 'false' end)
+    using p_ids;
+end $$;
+
+create or replace function public.admin_archivar_cancelaciones(p_ids uuid[])
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare cantidad integer;
+begin
+  if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  if coalesce(cardinality(p_ids), 0) not between 1 and 1000 then raise exception 'Selecciona entre 1 y 1000 registros.'; end if;
+  update public.cancellations c set admin_archived_at = now()
+    where c.id = any(p_ids) and c.admin_archived_at is null and public.admin_cancelacion_archivable(c.id);
+  get diagnostics cantidad = row_count;
+  if cantidad > 0 then
+    perform public.registrar_auditoria('archivar_cancelaciones_sancionadas', 'cancellations', null, jsonb_build_object('cantidad', cantidad));
+  end if;
+  return cantidad;
+end $$;
+
+create or replace function public.admin_enviar_papelera(p_tabla text, p_ids uuid[])
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare condicion text; cantidad integer;
+begin
+  if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  if coalesce(cardinality(p_ids), 0) not between 1 and 1000 then raise exception 'Selecciona entre 1 y 1000 registros.'; end if;
+  select elegible into condicion from public.admin_reglas_papelera() where tabla = p_tabla;
+  if condicion is null then raise exception 'Esta sección no admite papelera.'; end if;
+  if to_regclass('cron.job') is null then raise exception 'El programador de purga todavía no está configurado.'; end if;
+  if not exists (select 1 from cron.job where jobname = 'mercado-extra-purgar-papelera' and active) then
+    raise exception 'El programador de purga no está activo.';
+  end if;
+  execute format('update public.%I r set admin_archived_at = now()
+    where r.id = any($1) and r.admin_archived_at is null and (%s)', p_tabla, condicion) using p_ids;
+  get diagnostics cantidad = row_count;
+  if cantidad > 0 then
+    perform public.registrar_auditoria('archivar_resueltos', p_tabla, null, jsonb_build_object('cantidad', cantidad));
+  end if;
+  return cantidad;
+end $$;
+
+-- Retira el acceso a la operación antigua que abarcaba toda la sección.
+do $$
+begin
+  if to_regprocedure('public.admin_archivar_resueltos(text)') is not null then
+    revoke execute on function public.admin_archivar_resueltos(text) from public, anon, authenticated;
+  end if;
+end $$;
+
+create or replace function public.admin_eliminar_lista_filtrada(p_tabla text, p_estado text, p_apelacion text default null, p_busqueda text default null)
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare condicion text; ids uuid[]; cantidad integer := 0; lote integer;
+begin
+  if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  select elegible into condicion from public.admin_reglas_papelera()
+    where tabla = p_tabla and tabla not in ('subscription_plans', 'categories');
+  if condicion is null or nullif(btrim(p_estado), '') is null then
+    raise exception 'Selecciona un estado para eliminar la lista.';
+  end if;
+  loop
+    execute format('select array(select r.id from public.%I r cross join lateral (select to_jsonb(r) as d) f
+      where r.admin_archived_at is null and (%s)
+      and ($2 is null or f.d->>''appeal_status'' = $2)
+      and ($4 is null or strpos(lower(f.d->>''title''), lower($4)) > 0)
+      and case
+        when $3 = ''sanctions'' then
+          case when f.d->>''revoked_at'' is not null or f.d->>''appeal_status'' = ''aceptada'' then ''revocada''
+            when (f.d->>''ends_at'')::timestamptz <= now() then ''vencida'' end
+        when $3 in (''promotions'', ''subscriptions'') and f.d->>''status'' = ''activa''
+          and (f.d->>''ends_at'')::timestamptz <= now() then ''vencida''
+        else coalesce(f.d->>''status'', f.d->>''review_status'')
+      end = $1 order by r.id limit 1000 for update)', p_tabla, condicion)
+      into ids using p_estado, p_apelacion, p_tabla, nullif(btrim(p_busqueda), '');
+    if cardinality(ids) = 0 then return cantidad; end if;
+    lote := public.admin_enviar_papelera(p_tabla, ids);
+    cantidad := cantidad + lote;
+    if lote < cardinality(ids) then return cantidad; end if;
+  end loop;
+end $$;
+
+drop function if exists public.admin_listar_papelera(text, integer);
+create function public.admin_listar_papelera(p_tabla text, p_offset integer)
+returns table (tabla text, id uuid, titulo text, archivado_en timestamptz, conservar boolean)
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare consulta text;
+begin
+  if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  if p_offset is null or p_offset < 0 then raise exception 'Página no válida.'; end if;
+  select string_agg(format(
+    'select %L::text as tabla, r.id, coalesce(nullif(d.datos->>''name'', ''''), nullif(d.datos->>''title'', ''''),
+      nullif(d.datos->>''description'', ''''), nullif(d.datos->>''reason'', ''''), nullif(d.datos->>''decision'', ''''),
+      nullif(d.datos->>''reason_text'', ''''), r.id::text) as titulo, r.admin_archived_at as archivado_en,
+      coalesce(%L = ''cancellations'' and d.datos->>''review_status'' = ''injustificada'', false) as conservar
+      from public.%I r cross join lateral (select to_jsonb(r) as datos) d where r.admin_archived_at is not null',
+    regla.tabla, regla.tabla, regla.tabla), ' union all ')
+    into consulta from public.admin_reglas_papelera() regla where p_tabla is null or regla.tabla = p_tabla;
+  if consulta is null then raise exception 'Esta sección no admite papelera.'; end if;
+  return query execute 'select * from (' || consulta || ') p order by archivado_en desc, tabla, id limit 26 offset $1' using p_offset;
+end $$;
+
+create or replace function public.admin_recuperar_archivado(p_tabla text, p_id uuid)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare cantidad integer;
+begin
+  if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
+  if not exists (select 1 from public.admin_reglas_papelera() where tabla = p_tabla) then
+    raise exception 'Esta sección no admite papelera.';
+  end if;
+  execute format('update public.%I set admin_archived_at = null where id = $1 and admin_archived_at is not null', p_tabla)
+    using p_id;
+  get diagnostics cantidad = row_count;
+  if cantidad = 0 then raise exception 'El registro ya no está en la papelera.'; end if;
+  perform public.registrar_auditoria('recuperar_archivado', p_tabla, p_id::text);
+end $$;
+
+create or replace function public.admin_purgar_papelera()
+returns void language plpgsql set search_path = public, pg_temp as $$
+declare regla record; registro record;
+begin
+  for regla in select * from public.admin_reglas_papelera() loop
+    for registro in execute format('select r.id from public.%I r
+      where r.admin_archived_at <= now() - interval ''360 hours'' and (%s)
+      order by r.admin_archived_at for update skip locked limit 250', regla.tabla, regla.elegible) loop
+      begin
+        execute format('delete from public.%I r where r.id = $1
+          and r.admin_archived_at <= now() - interval ''360 hours'' and (%s)', regla.tabla, regla.elegible) using registro.id;
+      exception when foreign_key_violation then
+        raise warning 'Se conserva %.% por una dependencia.', regla.tabla, registro.id;
+      end;
+    end loop;
+  end loop;
+end $$;
+
+revoke execute on function public.admin_reglas_papelera(), public.proteger_papelera_admin(),
+  public.admin_cancelacion_archivable(uuid), public.admin_acciones_papelera(text, uuid[]), public.admin_archivar_cancelaciones(uuid[]),
+  public.admin_purgar_papelera(), public.admin_enviar_papelera(text, uuid[]),
+  public.admin_eliminar_lista_filtrada(text, text, text, text),
+  public.admin_listar_papelera(text, integer), public.admin_recuperar_archivado(text, uuid)
+from public, anon, authenticated;
+grant execute on function public.admin_enviar_papelera(text, uuid[]), public.admin_listar_papelera(text, integer),
+  public.admin_acciones_papelera(text, uuid[]), public.admin_archivar_cancelaciones(uuid[]),
+  public.admin_eliminar_lista_filtrada(text, text, text, text),
+  public.admin_recuperar_archivado(text, uuid) to authenticated;
+
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron with schema pg_catalog;
+    perform cron.schedule('mercado-extra-purgar-papelera', '*/15 * * * *', 'select public.admin_purgar_papelera()');
+  end if;
+end $$;
+
 commit;

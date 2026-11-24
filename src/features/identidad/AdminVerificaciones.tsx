@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
+import FiltroEstado from "@/components/FiltroEstado";
 import { estiloInput } from "@/components/Campo";
 import { useAuth } from "@/features/auth/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -20,7 +21,7 @@ type Fila = {
 export default function AdminVerificaciones() {
   const { session } = useAuth();
   const cliente = useQueryClient();
-  const [filtro, setFiltro] = useState<"pendiente" | "verificado" | "rechazado">("pendiente");
+  const [filtro, setFiltro] = useState<"" | "pendiente" | "verificado" | "rechazado">("pendiente");
   const [abierta, setAbierta] = useState<string | null>(null);
   const [urls, setUrls] = useState<{ dni: string | null; selfie: string | null } | null>(null);
   const [motivo, setMotivo] = useState("");
@@ -30,11 +31,11 @@ export default function AdminVerificaciones() {
     queryKey: ["verificaciones", filtro],
     queryFn: async (): Promise<Fila[]> => {
       if (!supabase) return [];
-      const { data, error } = await supabase
+      const consulta = supabase
         .from("identity_verifications")
-        .select("id,user_id,dni,dni_photo_path,selfie_path,status,rejection_reason,submitted_at,profiles:user_id(full_name,email,phone)")
-        .eq("status", filtro)
-        .order("submitted_at", { ascending: true });
+        .select("id,user_id,dni,dni_photo_path,selfie_path,status,rejection_reason,submitted_at,profiles:user_id(full_name,email,phone)");
+      if (filtro) consulta.eq("status", filtro);
+      const { data, error } = await consulta.order("submitted_at", { ascending: true });
       if (error) throw error;
       return (data ?? []) as unknown as Fila[];
     },
@@ -98,14 +99,8 @@ export default function AdminVerificaciones() {
 
   return (
     <div className="space-y-4">
-      <div className="max-w-xs">
-        <label htmlFor="filtro-estado" className="block font-bold">Estado</label>
-        <select id="filtro-estado" className={estiloInput} value={filtro} onChange={(e) => { setFiltro(e.target.value as typeof filtro); setAbierta(null); setUrls(null); }}>
-          <option value="pendiente">Pendientes</option>
-          <option value="verificado">Verificados</option>
-          <option value="rechazado">Rechazados</option>
-        </select>
-      </div>
+      <FiltroEstado estados={["pendiente", "verificado", "rechazado"] as const} valor={filtro}
+        cambiar={(valor) => { setFiltro(valor); setAbierta(null); setUrls(null); }} />
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}
       {lista.isLoading && <p className="text-suave">Cargando…</p>}
       {lista.error && <p role="alert" className="text-error">No se pudo cargar la lista.</p>}

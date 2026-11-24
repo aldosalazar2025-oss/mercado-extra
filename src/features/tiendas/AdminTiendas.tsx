@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
+import FiltroEstado from "@/components/FiltroEstado";
 import { estiloInput } from "@/components/Campo";
 import { useAuth } from "@/features/auth/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -12,7 +13,7 @@ type Fila = Tienda & { profiles: { full_name: string; email: string | null } | n
 export default function AdminTiendas() {
   const { session } = useAuth();
   const cliente = useQueryClient();
-  const [filtro, setFiltro] = useState<EstadoTienda>("pendiente");
+  const [filtro, setFiltro] = useState<EstadoTienda | "">("pendiente");
   const [motivos, setMotivos] = useState<Record<string, string>>({});
   const [mensaje, setMensaje] = useState<string | null>(null);
 
@@ -20,7 +21,9 @@ export default function AdminTiendas() {
     queryKey: ["admin-tiendas", filtro],
     queryFn: async () => {
       if (!supabase) return { filas: [] as Fila[], identidad: new Map<string, string>() };
-      const { data, error } = await supabase.from("stores").select(`${COLUMNAS_TIENDA},profiles:owner_id(full_name,email)`).eq("status", filtro).order("created_at");
+      const consulta = supabase.from("stores").select(`${COLUMNAS_TIENDA},profiles:owner_id(full_name,email)`);
+      if (filtro) consulta.eq("status", filtro);
+      const { data, error } = await consulta.order("created_at");
       if (error) throw error;
       const filas = (data ?? []) as unknown as Fila[];
       const identidad = new Map<string, string>();
@@ -54,16 +57,8 @@ export default function AdminTiendas() {
 
   return (
     <div className="space-y-4">
-      <div className="max-w-xs">
-        <label htmlFor="filtro-tiendas" className="block font-bold">Estado</label>
-        <select id="filtro-tiendas" className={estiloInput} value={filtro} onChange={(e) => setFiltro(e.target.value as EstadoTienda)}>
-          <option value="pendiente">Pendientes</option>
-          <option value="aprobada">Aprobadas</option>
-          <option value="rechazada">Rechazadas</option>
-          <option value="suspendida">Suspendidas</option>
-          <option value="inactiva">Inactivas</option>
-        </select>
-      </div>
+      <FiltroEstado<EstadoTienda> estados={["pendiente", "aprobada", "rechazada", "suspendida", "inactiva"]}
+        valor={filtro} cambiar={setFiltro} />
       {mensaje && <p role="status" className="rounded-lg bg-maiz-suave p-3 text-sm">{mensaje}</p>}
       {lista.isLoading && <p className="text-suave">Cargando…</p>}
       {lista.error && <p role="alert" className="text-error">No se pudo cargar la lista.</p>}
