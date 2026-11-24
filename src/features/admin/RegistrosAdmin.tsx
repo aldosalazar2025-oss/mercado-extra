@@ -116,15 +116,24 @@ const estadoCuenta = [
 const fichas: Record<string, Ficha> = {
   Usuarios: {
     tabla: "profiles",
-    columnas: "id,full_name,email,status,is_seller,is_admin,created_at",
+    columnas: "id,full_name,email,status,is_seller,is_admin,created_at,verificacion:identity_verifications!identity_verifications_user_id_fkey(status)",
     buscar: { etiqueta: "Nombre o correo", campo: (valor) => valor.includes("@") ? "email" : "full_name" },
     estados: estadoCuenta.map(([id]) => id),
     titulo: (f) => texto(f, "full_name") || texto(f, "email") || "Usuario sin nombre",
-    detalle: (f) => <>
-      <p className="break-words text-sm">{texto(f, "email")} · {f.is_admin ? "Administración" : f.is_seller ? "Vendedor" : "Comprador"}</p>
-      {!f.is_admin && <FormularioCaso key={String(f.status)} titulo="Cambiar estado de la cuenta" opciones={estadoCuenta.filter(([id]) => id !== f.status)} confirmar
-        ejecutar={(motivo, estado) => accion("admin_estado_usuario", { p_id: f.id, p_estado: estado, p_motivo: motivo })} />}
-    </>,
+    detalle: (f) => {
+      const verificacion = (f.verificacion as { status: string } | null)?.status;
+      const opciones: (readonly [string, string])[] = estadoCuenta.filter(([id]) => id !== f.status);
+      if (verificacion === "pendiente" || verificacion === "verificado") {
+        opciones.push(["suplantacion", "Bloquear por suplantación"]);
+      }
+      return <>
+        <p className="break-words text-sm">{texto(f, "email")} · {f.is_admin ? "Administración" : f.is_seller ? "Vendedor" : "Comprador"}</p>
+        {!f.is_admin && <FormularioCaso key={`${f.status}-${verificacion ?? ""}`} titulo="Cambiar estado de la cuenta" opciones={opciones} confirmar
+          ejecutar={(motivo, estado) => estado === "suplantacion"
+            ? accion("admin_bloquear_suplantacion", { p_id: f.id, p_motivo: motivo })
+            : accion("admin_estado_usuario", { p_id: f.id, p_estado: estado, p_motivo: motivo })} />}
+      </>;
+    },
   },
   Solicitudes: {
     tabla: "requests",
@@ -233,6 +242,9 @@ const fichas: Record<string, Ficha> = {
             : cambiosAuditados[cambio] ?? etiqueta(f.action)}
         </Dato>
         <Dato rotulo="Motivo registrado" anchoCompleto>{meta ? texto(meta, "motivo") || "No se registró un motivo en auditoría." : "No se registró un motivo en auditoría."}</Dato>
+        {meta?.identidad_nueva === "rechazado" && <Dato rotulo="Verificación de identidad" anchoCompleto>
+          Rechazada. El titular real puede presentar su DNI desde su propia cuenta.
+        </Dato>}
       </DatosFicha>;
     },
   },

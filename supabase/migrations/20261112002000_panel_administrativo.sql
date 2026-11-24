@@ -44,6 +44,42 @@ begin
     jsonb_build_object('anterior', v_anterior, 'nuevo', p_estado, 'motivo', btrim(p_motivo)));
 end $$;
 
+create or replace function public.admin_bloquear_suplantacion(p_id uuid, p_motivo text)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  estado_cuenta public.cuenta_estado;
+  verificacion_id uuid;
+  estado_identidad public.verificacion_estado;
+  motivo text := btrim(p_motivo);
+begin
+  if not public.is_admin() or not public.cuenta_activa() then
+    raise exception 'Se requiere acceso administrativo.' using errcode = '42501';
+  end if;
+  if coalesce(char_length(motivo), 0) not between 5 and 3000 then
+    raise exception 'Escribe el motivo de la suplantación (entre 5 y 3000 caracteres).';
+  end if;
+  select status into estado_cuenta from public.profiles where id = p_id and not is_admin for update;
+  if not found then raise exception 'Solo se pueden bloquear cuentas sin acceso administrativo completo.'; end if;
+
+  select id, status into verificacion_id, estado_identidad
+    from public.identity_verifications where user_id = p_id and status <> 'rechazado' for update;
+  if not found then raise exception 'La cuenta no tiene una verificación pendiente o verificada que se pueda rechazar.'; end if;
+
+  if estado_cuenta <> 'bloqueado' then
+    perform public.admin_estado_usuario(p_id, 'bloqueado', motivo);
+  end if;
+  update public.identity_verifications
+    set status = 'rechazado', rejection_reason = motivo, reviewed_by = auth.uid(), reviewed_at = now()
+    where id = verificacion_id;
+
+  perform public.registrar_auditoria('bloquear_por_suplantacion', 'profiles', p_id::text,
+    jsonb_build_object('anterior', estado_cuenta, 'nuevo', 'bloqueado', 'verificacion_id', verificacion_id,
+      'identidad_anterior', estado_identidad, 'identidad_nueva', 'rechazado', 'motivo', motivo));
+end $$;
+
+revoke execute on function public.admin_bloquear_suplantacion(uuid, text) from public, anon;
+grant execute on function public.admin_bloquear_suplantacion(uuid, text) to authenticated;
+
 create or replace function public.admin_resolver_denuncia_calificacion(p_id uuid, p_aceptar boolean, p_motivo text) returns void
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
