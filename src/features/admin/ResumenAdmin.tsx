@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/features/auth/AuthContext";
 import { slug } from "@/panels/config";
+import { EquipoAdmin } from "./EquipoAdmin";
 
 const indicadores = [
   ["usuarios", "Usuarios registrados", "Usuarios"],
@@ -30,7 +31,7 @@ export default function ResumenAdmin() {
   if (consulta.isError) return <p role="alert" className="text-error">No se pudo cargar el resumen administrativo.</p>;
 
   return (
-    <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {indicadores.map(([clave, titulo, seccion]) => (
         <li key={clave}>
           <Link to={`/admin/${slug(seccion)}`} className="block h-full rounded-xl border border-borde bg-white p-4 hover:border-mercado">
@@ -39,6 +40,7 @@ export default function ResumenAdmin() {
           </Link>
         </li>
       ))}
+      <EquipoAdmin />
     </ul>
   );
 }

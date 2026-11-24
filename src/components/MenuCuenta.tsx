@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/features/auth/AuthContext";
+import { useMiAccesoAdmin } from "@/features/admin/EquipoAdmin";
 import FotoPerfil from "./FotoPerfil";
 
 const trazos = {
@@ -22,6 +23,7 @@ function Icono({ tipo }: { tipo: keyof typeof trazos }) {
 
 export default function MenuCuenta({ panel }: { panel: RefObject<HTMLDialogElement> }) {
   const { perfil, session, verificacion, cerrarSesion } = useAuth();
+  const accesoAdmin = useMiAccesoAdmin();
   const cerrar = () => panel.current?.close();
   const estilo = "flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left font-bold text-tinta hover:bg-hoja";
 
@@ -54,6 +56,11 @@ export default function MenuCuenta({ panel }: { panel: RefObject<HTMLDialogEleme
             <li><Link to="/vendedor/mis-tiendas" className={estilo} onClick={cerrar}><Icono tipo="tienda" /> Mis tiendas</Link></li>
             {perfil?.is_admin && perfil.status === "activo" && (
               <li><Link to="/admin" className={estilo} onClick={cerrar}><Icono tipo="admin" /> Panel administrativo</Link></li>
+            )}
+            {!perfil?.is_admin && accesoAdmin.data && (
+              <li><Link to="/acceso-administrativo" className={estilo} onClick={cerrar}><Icono tipo="admin" />
+                {accesoAdmin.data.estado === "pendiente" ? "Invitación administrativa" : "Acceso administrativo"}
+              </Link></li>
             )}
             <li><button type="button" className={estilo} onClick={() => { cerrar(); void cerrarSesion(); }}><Icono tipo="salir" /> Cerrar sesión</button></li>
           </ul>

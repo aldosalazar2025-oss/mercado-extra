@@ -381,4 +381,148 @@ begin
   end if;
 end $$;
 
+-- Las invitaciones delegadas nunca conceden el rol global de profiles.
+create or replace function public.admin_modulos_delegables()
+returns text[] language sql immutable set search_path = public, pg_temp as $$
+  select array['resumen','usuarios','identidad','tiendas','categorias','productos','solicitudes','ofertas',
+    'operaciones','reclamos','cancelaciones','sanciones','promociones','planes','reputacion','auditoria']::text[]
+$$;
+
+create table if not exists public.admin_invitaciones (
+  id uuid primary key default gen_random_uuid(),
+  correo text not null unique,
+  permisos text[] not null,
+  estado text not null default 'pendiente' check (estado in ('pendiente', 'activa', 'revocada')),
+  usuario_id uuid references public.profiles(id) on delete cascade,
+  constraint admin_invitaciones_usuario_activo check (estado <> 'activa' or usuario_id is not null)
+);
+alter table public.admin_invitaciones drop constraint if exists admin_invitaciones_permisos_check;
+alter table public.admin_invitaciones add constraint admin_invitaciones_permisos_check
+  check (cardinality(permisos) > 0 and permisos <@ public.admin_modulos_delegables());
+alter table public.admin_invitaciones enable row level security;
+create unique index if not exists admin_invitaciones_usuario_idx on public.admin_invitaciones (usuario_id) where usuario_id is not null;
+revoke all on public.admin_invitaciones from public, anon, authenticated;
+
+create or replace function public.admin_equipo()
+returns jsonb language plpgsql stable security definer set search_path = public, pg_temp as $$
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Acceso restringido.' using errcode = '42501'; end if;
+  return jsonb_build_object(
+    'titulares', (select count(*) from public.profiles where is_admin and status = 'activo'),
+    'invitaciones', coalesce((select jsonb_agg(to_jsonb(i) order by i.correo) from public.admin_invitaciones i), '[]'::jsonb)
+  );
+end $$;
+
+create or replace function public.admin_invitar(p_correo text, p_permisos text[])
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+declare correo_invitado text := lower(btrim(p_correo)); invitacion uuid;
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Acceso restringido.' using errcode = '42501'; end if;
+  if correo_invitado is null or length(correo_invitado) > 254 or correo_invitado !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
+    raise exception 'Escribe un correo válido.';
+  end if;
+  if exists (select 1 from public.profiles p where lower(p.email) = correo_invitado and p.is_admin) then
+    raise exception 'Este correo ya tiene acceso administrativo completo.';
+  end if;
+  if coalesce(cardinality(p_permisos), 0) not between 1 and cardinality(public.admin_modulos_delegables())
+    or exists (select 1 from unnest(p_permisos) a where a is null)
+    or not (p_permisos <@ public.admin_modulos_delegables()) then
+    raise exception 'Selecciona permisos válidos.';
+  end if;
+  insert into public.admin_invitaciones as i (correo, permisos)
+    values (correo_invitado, array(select distinct unnest(p_permisos)))
+    on conflict (correo) do update set permisos = excluded.permisos,
+      estado = case when i.estado = 'activa' then 'activa' else 'pendiente' end,
+      usuario_id = case when i.estado = 'activa' then i.usuario_id end
+    returning id into invitacion;
+  perform public.registrar_auditoria('guardar_invitacion_administrativa', 'admin_invitaciones', invitacion::text,
+    jsonb_build_object('permisos', p_permisos));
+end $$;
+
+create or replace function public.admin_revocar_invitacion(p_id uuid)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Acceso restringido.' using errcode = '42501'; end if;
+  update public.admin_invitaciones set estado = 'revocada', usuario_id = null where id = p_id and estado <> 'revocada';
+  if not found then raise exception 'La invitación ya no está vigente.'; end if;
+  perform public.registrar_auditoria('revocar_invitacion_administrativa', 'admin_invitaciones', p_id::text);
+end $$;
+
+create or replace function public.mi_acceso_administrativo()
+returns jsonb language sql stable security definer set search_path = public, pg_temp as $$
+  select to_jsonb(i) - 'usuario_id'
+  from public.admin_invitaciones i
+  where public.cuenta_activa()
+    and ((i.estado = 'pendiente' and i.correo = lower(auth.jwt()->>'email'))
+      or (i.estado = 'activa' and i.usuario_id = auth.uid()))
+  order by (i.estado = 'activa') desc
+  limit 1
+$$;
+
+create or replace function public.aceptar_invitacion_admin(p_id uuid)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if not public.cuenta_activa() then raise exception 'Acceso restringido.' using errcode = '42501'; end if;
+  update public.admin_invitaciones set estado = 'activa', usuario_id = auth.uid()
+    where id = p_id and estado = 'pendiente' and correo = lower(auth.jwt()->>'email');
+  if not found then raise exception 'La invitación no está disponible para esta cuenta.'; end if;
+  insert into public.audit_logs(actor_id, action, entity, entity_id)
+    values (auth.uid(), 'aceptar_invitacion_administrativa', 'admin_invitaciones', p_id::text);
+end $$;
+
+drop function if exists public.admin_consultar_delegado(text, integer);
+create function public.admin_consultar_delegado(p_seccion text, p_offset integer)
+returns table (id text, titulo text, estado text, fecha timestamptz)
+language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare consulta text;
+begin
+  if not public.cuenta_activa() or not exists (
+    select 1 from public.admin_invitaciones i
+    where i.usuario_id = auth.uid() and i.estado = 'activa' and p_seccion = any(i.permisos)
+  ) then raise exception 'Acceso restringido.' using errcode = '42501'; end if;
+  if p_offset is null or p_offset < 0 then raise exception 'Página no válida.'; end if;
+  consulta := case p_seccion
+    when 'resumen' then $resumen$
+      values ('1', 'Usuarios registrados', (select count(*)::text from public.profiles), null::timestamptz),
+        ('2', 'Identidades pendientes', (select count(*)::text from public.identity_verifications where status='pendiente'), null),
+        ('3', 'Tiendas pendientes', (select count(*)::text from public.stores where status='pendiente'), null),
+        ('4', 'Solicitudes abiertas o con ofertas', (select count(*)::text from public.requests where status in ('abierta','con_ofertas')), null),
+        ('5', 'Pedidos en curso', (select count(*)::text from public.orders where status not in ('completada','cancelada')), null),
+        ('6', 'Reclamos por resolver', (select count(*)::text from public.claims where status in ('abierto','en_revision')), null),
+        ('7', 'Cancelaciones denunciadas', (select count(*)::text from public.cancellations where review_status='denunciada'), null),
+        ('8', 'Denuncias de calificaciones pendientes', (select count(*)::text from public.rating_reports where status='pendiente'), null)
+    $resumen$
+    when 'usuarios' then 'select id, coalesce(nullif(full_name, ''''), ''Usuario''), status::text, created_at from public.profiles'
+    when 'identidad' then 'select id, ''Verificación de identidad''::text, status::text, submitted_at from public.identity_verifications'
+    when 'tiendas' then 'select id, name, status::text, created_at from public.stores'
+    when 'categorias' then 'select id, name, case when active then ''activa'' else ''desactivada'' end, created_at from public.categories where admin_archived_at is null'
+    when 'productos' then 'select id, name, case when admin_hidden then ''retirado'' else status::text end, created_at from public.products where status <> ''eliminado'''
+    when 'solicitudes' then 'select id, title, status::text, created_at from public.requests where admin_archived_at is null'
+    when 'ofertas' then 'select o.id, r.title, o.status::text, o.created_at from public.offers o join public.requests r on r.id=o.request_id where o.admin_archived_at is null'
+    when 'operaciones' then 'select o.id, r.title, o.status::text, o.created_at from public.orders o join public.requests r on r.id=o.request_id where o.admin_archived_at is null'
+    when 'reclamos' then 'select id, type::text, status::text, created_at from public.claims where admin_archived_at is null'
+    when 'cancelaciones' then 'select id, reason_code::text, review_status::text, created_at from public.cancellations where admin_archived_at is null'
+    when 'sanciones' then 'select id, type::text, case when revoked_at is not null or appeal_status = ''aceptada'' then ''revocada''
+      when ends_at <= now() then ''vencida'' when starts_at > now() then ''programada'' else ''activa'' end, created_at
+      from public.sanctions where admin_archived_at is null'
+    when 'promociones' then 'select id, ''Promoción''::text, case when status = ''activa'' and ends_at <= now() then ''vencida'' else status::text end,
+      created_at from public.promotions where admin_archived_at is null'
+    when 'planes' then 'select id, name, case when active then ''disponible'' else ''desactivado'' end, null::timestamptz
+      from public.subscription_plans where admin_archived_at is null'
+    when 'reputacion' then 'select id, ''Denuncia de calificación''::text, status::text, created_at from public.rating_reports where admin_archived_at is null'
+    when 'auditoria' then 'select id, action, entity, created_at from public.audit_logs'
+  end;
+  if consulta is null then raise exception 'Sección no disponible.'; end if;
+  return query execute 'select r.id::text, r.titulo, r.estado, r.fecha from (' || consulta ||
+    ') r(id,titulo,estado,fecha) order by r.fecha desc nulls last, r.id limit 21 offset $1' using p_offset;
+end $$;
+
+revoke execute on function public.admin_equipo(), public.admin_invitar(text, text[]), public.admin_revocar_invitacion(uuid),
+  public.admin_modulos_delegables(),
+  public.mi_acceso_administrativo(), public.aceptar_invitacion_admin(uuid), public.admin_consultar_delegado(text, integer)
+from public, anon, authenticated;
+grant execute on function public.admin_equipo(), public.admin_invitar(text, text[]), public.admin_revocar_invitacion(uuid),
+  public.mi_acceso_administrativo(), public.aceptar_invitacion_admin(uuid), public.admin_consultar_delegado(text, integer)
+to authenticated;
+
 commit;

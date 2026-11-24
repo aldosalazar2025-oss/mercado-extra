@@ -13,6 +13,7 @@ import Panel from "@/panels/Panel";
 import AvisoRegistro from "@/components/AvisoRegistro";
 import AuthCallback from "@/features/auth/AuthCallback";
 import { RequiereAdmin, RequiereSesion } from "@/features/auth/Rutas";
+import { PanelDelegado } from "@/features/admin/EquipoAdmin";
 import Registro from "@/features/identidad/Registro";
 import Privacidad from "@/pages/Privacidad";
 import Notificaciones from "@/pages/Notificaciones";
@@ -78,6 +79,7 @@ export default function App() {
           <Route path="/vendedor/mis-tiendas/nueva" element={<Panel panel="vendedor" seccion="Mis tiendas" contenido={<NuevaTienda />} />} />
           <Route path="/vendedor/mis-tiendas/:tiendaId" element={<Panel panel="vendedor" seccion="Mis tiendas" contenido={<TiendaDetalle />} />} />
           <Route path="/vendedor/:seccion?" element={<Panel panel="vendedor" />} />
+          <Route path="/acceso-administrativo" element={<PanelDelegado />} />
           <Route element={<RequiereAdmin />}>
             <Route path="/admin/:seccion?" element={<Panel panel="admin" />} />
           </Route>
