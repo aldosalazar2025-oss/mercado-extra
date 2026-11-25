@@ -77,6 +77,8 @@ function Dato({ rotulo, children, anchoCompleto = false }: { rotulo: string; chi
 
 const registrosAuditados: Record<string, string> = {
   profiles: "Cuenta de usuario",
+  orders: "Pedido",
+  limpieza: "Limpieza de datos",
   claims: "Reclamo",
   reclamo: "Reclamo",
   cancellations: "Cancelación",
@@ -94,6 +96,16 @@ const registrosAuditados: Record<string, string> = {
 };
 
 const cambiosAuditados: Record<string, string> = {
+  vaciar_datos: "Vació secciones de la plataforma",
+  cerrar_y_archivar: "Cerró y archivó el registro",
+  pedido_reportar: "Reportó una entrega sin código",
+  pedido_validar_entrega: "Validó la entrega sin código",
+  pedido_rechazar_entrega: "Rechazó el reporte de entrega",
+  pedido_confirmar_comprador: "Confirmó el cierre como comprador",
+  pedido_confirmar_tienda: "Confirmó el cierre como tienda",
+  pedido_intervenir: "Solicitó intervención para el cierre",
+  pedido_cerrar_admin: "Cerró la operación como administrador",
+  pedido_cerrar_sin_entrega: "Cerró el pedido sin entrega confirmada",
   dar_baja_usuario: "Dio de baja la cuenta",
   dar_baja_tienda: "Dio de baja la tienda",
   activar: "Activó la solicitud",
@@ -270,6 +282,7 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
   const ficha = fichas[seccion];
   const reputacion = seccion === "Reputación";
   const auditoria = seccion === "Auditoría";
+  const operaciones = seccion === "Operaciones";
   const eliminables = estadosEliminables[ficha.tabla];
   const resaltaEstado = Boolean(ficha.estados);
   const { session } = useAuth();
@@ -279,10 +292,11 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
   const [busqueda, setBusqueda] = useState("");
   const [estado, setEstado] = useState(reputacion ? "pendiente" : "");
   const [entidad, setEntidad] = useState("");
+  const [filtroEntrega, setFiltroEntrega] = useState("");
   const [pagina, setPagina] = useState(0);
   const [papelera, setPapelera] = useState(false);
   const consulta = useQuery({
-    queryKey: ["admin", session?.user.id, ficha.tabla, id, busqueda, estado, entidad, pagina],
+    queryKey: ["admin", session?.user.id, ficha.tabla, id, busqueda, estado, entidad, filtroEntrega, pagina],
     enabled: !papelera && (!id || uuid.test(id)),
     queryFn: async () => {
       if (!supabase) throw new Error("Sin conexión");
@@ -291,6 +305,11 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
       if (!id && ficha.tabla === "profiles") base.is("admin_baja_at", null);
       if (eliminables && !id) base.is("admin_archived_at", null);
       if (estado && !id) base.eq("status", estado);
+      if (operaciones && filtroEntrega && !id) {
+        base.not("control", "is", null);
+        if (filtroEntrega === "disputa") base.eq("control.reporte", "pendiente");
+        else base.not("control.intervencion", "is", null).eq("status", "entregado");
+      }
       if (auditoria && entidad && !id) base.in("entity", Object.keys(registrosAuditados).filter((clave) => registrosAuditados[clave] === entidad));
       if (busqueda && ficha.buscar && !id) {
         const termino = auditoria ? busqueda.replace(/\s+/g, "_") : busqueda;
@@ -323,10 +342,10 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
     setBusqueda(textoBusqueda.trim());
     setPagina(0);
   }
-  const seleccion = useSeleccionPapelera(JSON.stringify([seccion, id, estado, pagina, busqueda]),
-    !id && eliminables && estado ? consulta.data?.filas.map((fila) => String(fila.id)) ?? [] : []);
   const acciones = useAccionesPapelera(ficha.tabla, eliminables
     ? consulta.data?.filas.filter((fila) => eliminables.includes(texto(fila, "status"))).map((fila) => String(fila.id)) ?? [] : []);
+  const seleccion = useSeleccionPapelera(JSON.stringify([seccion, id, estado, pagina, busqueda, filtroEntrega]),
+    !id && acciones ? [...acciones.keys()] : []);
 
   return (
     <div className="space-y-4">
@@ -351,6 +370,14 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
         </form>}
         {ficha.estados && <FiltroEstado estados={ficha.estados} valor={estado}
           cambiar={(valor) => { setEstado(valor); setPagina(0); }} />}
+        {operaciones && <label className="text-sm font-bold">Entrega y cierre
+          <select className="mt-1 block min-h-11 rounded-lg border border-borde bg-white px-3" value={filtroEntrega}
+            onChange={(e) => { setFiltroEntrega(e.target.value); setEstado(""); setPagina(0); }}>
+            <option value="">Todos</option>
+            <option value="disputa">Entrega en disputa</option>
+            <option value="intervencion">Intervención solicitada</option>
+          </select>
+        </label>}
         {auditoria && <label className="text-sm font-bold">Registro afectado
           <select className="mt-1 block min-h-11 rounded-lg border border-borde bg-white px-3" value={entidad}
             onChange={(e) => { setEntidad(e.target.value); setPagina(0); }}>
@@ -360,6 +387,9 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
           </select>
         </label>}
       </div>}
+      {eliminables && consulta.data?.filas.length && !id && acciones?.size === 0 ? (
+        <p className="text-sm text-suave">No hay registros listos para archivar o enviar a la papelera en este filtro.</p>
+      ) : null}
       <SeleccionPapelera tabla={ficha.tabla} seleccion={seleccion} acciones={acciones} />
       {consulta.isLoading && <p className="text-suave">Cargando registros…</p>}
       {consulta.isError && <p role="alert" className="text-error">No se pudieron cargar los registros.</p>}
@@ -396,6 +426,12 @@ export default function RegistrosAdmin({ seccion }: { seccion: string }) {
             {(acciones?.has(String(f.id)) || seleccion.visibles.includes(String(f.id))) &&
               <AccionesTarjeta tabla={ficha.tabla} id={String(f.id)} seleccion={seleccion}
                 accion={acciones?.get(String(f.id))} />}
+            {operaciones && f.status !== "completada" && f.status !== "cancelada" &&
+              <TachoBaja id={String(f.id)} nombre={String(ficha.titulo(f))} tipo={f.status === "entregado" ? "pedido_entregado" : "pedido"} />}
+            {ficha.tabla === "requests" && ["abierta", "con_ofertas"].includes(String(f.status)) &&
+              <TachoBaja id={String(f.id)} nombre={String(ficha.titulo(f))} tipo="solicitud" />}
+            {ficha.tabla === "offers" && f.status === "enviada" &&
+              <TachoBaja id={String(f.id)} nombre={String(ficha.titulo(f))} tipo="oferta" />}
           </div>
           <p className="text-sm text-suave">
             {f.status ? <>

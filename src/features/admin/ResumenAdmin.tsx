@@ -1,3 +1,4 @@
+import LimpiezaDatos from "./LimpiezaDatos";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -31,6 +32,7 @@ export default function ResumenAdmin() {
   if (consulta.isError) return <p role="alert" className="text-error">No se pudo cargar el resumen administrativo.</p>;
 
   return (
+    <div className="space-y-5">
     <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {indicadores.map(([clave, titulo, seccion]) => (
         <li key={clave}>
@@ -42,5 +44,7 @@ export default function ResumenAdmin() {
       ))}
       <EquipoAdmin />
     </ul>
+    <LimpiezaDatos />
+    </div>
   );
 }

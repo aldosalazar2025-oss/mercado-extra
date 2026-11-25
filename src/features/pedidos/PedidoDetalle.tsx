@@ -287,6 +287,7 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
 
   const antesDeEnviar = p.estado === "compra_coordinada" || p.estado === "en_preparacion";
   const otro = rol === "comprador" ? p.tienda : p.comprador || "Comprador";
+  const tieneReclamo = cierre.data?.reclamo_iniciado === true;
   const enEntrega = p.estado === "enviado_o_listo" || p.estado === "pendiente_confirmacion";
 
   return (
@@ -303,11 +304,11 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
         <div className="space-y-2 rounded-lg bg-hoja/40 p-3">
           <PerfilPedido pedido={p} nombre={otro} />
         </div>
-        <section aria-label="Seguimiento del pedido" className="space-y-2 border-t border-borde pt-3">
+        {cierre.isSuccess && !tieneReclamo && <section aria-label="Seguimiento del pedido" className="space-y-2 border-t border-borde pt-3">
           <h3 className="text-sm font-bold text-pino">Seguimiento del pedido</h3>
           <p className="text-sm text-suave">{p.modo === "domicilio" ? "Entrega a domicilio" : "Recojo en tienda"}</p>
           <Progreso p={p} />
-        </section>
+        </section>}
         <p className="text-sm">
           {p.conversation_id && <Link to={`/${rol}/chat/${p.conversation_id}`} className="font-bold text-mercado underline">Abrir el chat</Link>}
           {p.conversation_id && " · "}
@@ -315,13 +316,14 @@ export default function PedidoDetalle({ rol }: { rol: Rol }) {
         </p>
       </header>
 
-      {rol === "vendedor" && <AccionesTienda p={p} />}
-      {rol === "vendedor" && enEntrega && cierre.isSuccess && cierre.data?.reporte !== "pendiente" && <ConfirmarEntrega p={p} />}
-      {rol === "comprador" && <CodigoComprador p={p} />}
+      {rol === "vendedor" && cierre.isSuccess && !tieneReclamo && <AccionesTienda p={p} />}
+      {rol === "vendedor" && enEntrega && cierre.isSuccess && !tieneReclamo && cierre.data?.reporte !== "pendiente" && <ConfirmarEntrega p={p} />}
+      {rol === "comprador" && cierre.isSuccess && !tieneReclamo &&
+        cierre.data?.reporte !== "pendiente" && cierre.data?.reporte !== "aceptado" && <CodigoComprador p={p} />}
       {cierre.isError && <p role="alert" className="text-error">No se pudo consultar el cierre de la operación.</p>}
       {cierre.isSuccess && <CierrePedido id={p.order_id} uid={uid} rol={rol} estado={p.estado} control={cierre.data} />}
-      {(p.estado === "entregado" || p.estado === "completada") && <CalificarPedido key={`calificacion:${p.order_id}:${p.mi_rol}:${uid}`} p={p} uid={uid} />}
-      <CasosPedido key={`casos:${p.order_id}:${p.mi_rol}:${uid}`} pedido={p} uid={uid} />
+      <CasosPedido key={`casos:${p.order_id}:${p.mi_rol}:${uid}`} pedido={p} uid={uid} tieneReclamo={tieneReclamo} />
+      {(p.estado === "completada" || (p.estado === "entregado" && !tieneReclamo)) && <CalificarPedido key={`calificacion:${p.order_id}:${p.mi_rol}:${uid}`} p={p} uid={uid} />}
       <Evidencias p={p} editable={rol === "vendedor" && (antesDeEnviar || (p.modo === "recojo" && enEntrega))} uid={uid} />
 
       <section className="space-y-2 rounded-xl border border-borde bg-white p-4">

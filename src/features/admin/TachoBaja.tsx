@@ -3,16 +3,29 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Boton from "@/components/Boton";
 import { accion } from "@/features/reclamos/casos";
 
-export default function TachoBaja({ id, nombre, tipo }: { id: string; nombre: string; tipo: "usuario" | "tienda" }) {
+export default function TachoBaja({ id, nombre, tipo }: { id: string; nombre: string; tipo: "usuario" | "tienda" | "sancion" | "pedido" | "pedido_entregado" | "solicitud" | "oferta" }) {
   const dialogo = useRef<HTMLDialogElement>(null);
   const [motivo, setMotivo] = useState("");
   const cliente = useQueryClient();
-  const etiqueta = `Dar de baja a ${nombre}`;
+  const pedido = tipo === "pedido" || tipo === "pedido_entregado";
+  const tabla = pedido ? "orders" : tipo === "sancion" ? "sanctions"
+    : tipo === "solicitud" ? "requests" : tipo === "oferta" ? "offers" : null;
+  const cierre = tabla !== null;
+  const etiqueta = tipo === "sancion" ? "Revocar y archivar sanción" : pedido ? "Cerrar y archivar pedido" : tipo === "solicitud" ? "Cerrar y archivar solicitud"
+    : tipo === "oferta" ? "Retirar y archivar oferta" : `Dar de baja a ${nombre}`;
+  const detalle = tipo === "sancion" ? "La sanción dejará de aplicarse. Podrás consultar y recuperar el registro desde Auditoría."
+    : tipo === "pedido" ? "El pedido se marcará como cancelado. Las partes recibirán el motivo y el historial quedará en Auditoría."
+    : pedido ? "El pedido se marcará como completado. Las partes recibirán el motivo y el historial quedará en Auditoría."
+    : tipo === "solicitud" ? "La solicitud dejará de recibir ofertas y se retirarán las ofertas pendientes. El historial quedará en Auditoría."
+    : tipo === "oferta" ? "La oferta dejará de estar disponible para el comprador. El historial quedará en Auditoría."
+    : `Se liberará ${tipo === "usuario" ? "el DNI y el correo" : "el RUC"} y se conservará el historial.`;
   const baja = useMutation({
-    mutationFn: () => accion(`admin_dar_baja_${tipo}`, { p_id: id, p_motivo: motivo.trim() }),
+    mutationFn: () => cierre
+      ? accion("admin_cerrar_y_archivar", { p_tabla: tabla, p_id: id, p_motivo: motivo.trim() })
+      : accion(`admin_dar_baja_${tipo}`, { p_id: id, p_motivo: motivo.trim() }),
     onSuccess: async () => {
       dialogo.current?.close();
-      await Promise.all(["admin", "admin-tiendas"].map((clave) => cliente.invalidateQueries({ queryKey: [clave] })));
+      await Promise.all(["admin", "admin-tiendas", "casos", "pedidos", "mis-solicitudes", "ofertas-solicitud", "mis-ofertas", "solicitudes-recibidas"].map((clave) => cliente.invalidateQueries({ queryKey: [clave] })));
     },
   });
 
@@ -33,7 +46,7 @@ export default function TachoBaja({ id, nombre, tipo }: { id: string; nombre: st
           if (!baja.isPending && motivo.trim().length >= 5) baja.mutate();
         }}>
           <h3 className="font-display text-xl font-bold text-pino">{etiqueta}</h3>
-          <p className="text-sm text-suave">Se liberará {tipo === "usuario" ? "el DNI y el correo" : "el RUC"} y se conservará el historial.</p>
+          <p className="text-sm text-suave">{detalle}</p>
           <label className="block text-sm font-semibold">Motivo
             <textarea className="mt-1 block w-full rounded-lg border border-borde p-2 font-normal" rows={3}
               value={motivo} onChange={(evento) => setMotivo(evento.target.value)}
@@ -42,7 +55,7 @@ export default function TachoBaja({ id, nombre, tipo }: { id: string; nombre: st
           {baja.isError && <p role="alert" className="text-sm text-error">{baja.error.message}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             <Boton type="button" variante="contorno" disabled={baja.isPending} onClick={() => dialogo.current?.close()}>Cancelar</Boton>
-            <Boton type="submit" disabled={baja.isPending || motivo.trim().length < 5}>{baja.isPending ? "Guardando…" : "Confirmar baja"}</Boton>
+            <Boton type="submit" disabled={baja.isPending || motivo.trim().length < 5}>{baja.isPending ? "Guardando…" : cierre ? etiqueta : "Confirmar baja"}</Boton>
           </div>
         </form>
       </dialog>

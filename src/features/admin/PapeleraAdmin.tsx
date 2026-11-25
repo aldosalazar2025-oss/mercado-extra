@@ -88,18 +88,33 @@ export function SeleccionPapelera({ tabla, seleccion, acciones }: {
 }) {
   const { ids, visibles, guardar } = seleccion;
   if (!visibles.length) return null;
-  return <div className="flex items-center justify-between gap-3 rounded-lg border border-borde bg-white px-3 py-1">
+  return <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-borde bg-white px-3 py-1">
     <label className="flex items-center gap-2 text-sm font-semibold">
       <input type="checkbox" checked={ids.length === visibles.length} onChange={(e) => guardar(e.target.checked ? visibles : [])} />
-      Seleccionar todos los visibles
+      Seleccionar todos los archivables o eliminables
     </label>
-    <span className="ml-auto text-sm text-suave" aria-live="polite">{ids.length} seleccionados</span>
+    <span className="ml-auto text-sm text-suave" aria-live="polite">{ids.length} {ids.length === 1 ? "seleccionado" : "seleccionados"}</span>
     {(["archivar", "eliminar"] as const).map((modo) => {
       const permitidos = ids.filter((id) => acciones?.get(id) === modo);
       return permitidos.length > 0 && <EliminarRegistros key={modo} tabla={tabla} ids={permitidos} modo={modo}
         alEliminar={() => guardar(ids.filter((id) => !permitidos.includes(id)))} />;
     })}
   </div>;
+}
+
+export function TachoParaResolver({ destino, etiqueta }: { destino: string; etiqueta: string }) {
+  return <button type="button" aria-label={etiqueta} title={etiqueta}
+    className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-mercado hover:bg-hoja"
+    onClick={() => {
+      const destinoCaso = document.getElementById(destino);
+      if (destinoCaso instanceof HTMLDetailsElement) destinoCaso.open = true;
+      destinoCaso?.scrollIntoView({ block: "center" });
+      destinoCaso?.focus({ preventScroll: true });
+    }}>
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6h18M9 6V4h6v2m4 0-1 14H6L5 6m5 4v6m4-6v6" />
+    </svg>
+  </button>;
 }
 
 export function AccionesTarjeta({ tabla, id, seleccion, accion }: {

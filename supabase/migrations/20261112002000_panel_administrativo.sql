@@ -218,11 +218,14 @@ do $$
 declare regla record;
 begin
   for regla in select * from public.admin_reglas_papelera() loop
-    execute format('alter table public.%I add column if not exists admin_archived_at timestamptz', regla.tabla);
+    execute format('alter table public.%I add column if not exists admin_archived_at timestamptz,
+      add column if not exists admin_conserva_historial boolean not null default false', regla.tabla);
     execute format('create index if not exists %I on public.%I (admin_archived_at) where admin_archived_at is not null',
       regla.tabla || '_admin_archived_idx', regla.tabla);
     -- Las tablas con UPDATE directo requieren impedir que un cliente ajuste la fecha de purga.
     execute format('drop trigger if exists proteger_papelera_admin on public.%I', regla.tabla);
+    execute format('update public.%I r set admin_conserva_historial=true where r.admin_archived_at is not null
+      and not r.admin_conserva_historial and (%s) is not true', regla.tabla, regla.elegible);
   end loop;
 end $$;
 
@@ -230,8 +233,9 @@ create or replace function public.proteger_papelera_admin() returns trigger
 language plpgsql set search_path = public, pg_temp as $$
 begin
   if current_user in ('authenticated', 'anon') and (
-    (tg_op = 'INSERT' and new.admin_archived_at is not null)
-    or (tg_op = 'UPDATE' and new.admin_archived_at is distinct from old.admin_archived_at)
+    (tg_op = 'INSERT' and (new.admin_archived_at is not null or new.admin_conserva_historial))
+    or (tg_op = 'UPDATE' and (new.admin_archived_at is distinct from old.admin_archived_at
+      or new.admin_conserva_historial is distinct from old.admin_conserva_historial))
   ) then
     raise exception 'La fecha de archivo se gestiona desde la papelera administrativa.' using errcode = '42501';
   end if;
@@ -254,33 +258,48 @@ end $$;
 create or replace function public.admin_cancelacion_archivable(p_id uuid)
 returns boolean language sql stable set search_path = public, pg_temp as $$
   select exists (
-    select 1 from public.cancellations c join public.sanctions s
-      on s.source_type = 'cancelacion' and s.source_id = c.id
-    where c.id = p_id and c.review_status = 'injustificada'
+    select 1 from public.cancellations c where c.id=p_id and (
+      c.review_status='justificada' or (c.review_status='injustificada' and exists (
+        select 1 from public.sanctions s where s.source_type='cancelacion' and s.source_id=c.id
+      ))
+    )
   )
 $$;
 
--- El archivo administrativo conserva las negociaciones ligadas a una venta completada.
+-- Un expediente cerrado permite retirar las fichas del panel conservando sus relaciones.
 create or replace function public.admin_venta_archivable(p_solicitud uuid)
 returns boolean language sql stable set search_path = public, pg_temp as $$
-  select exists (select 1 from public.orders where request_id = p_solicitud and status = 'completada')
-    and not exists (
-      select 1 from public.orders o where o.request_id = p_solicitud and (
-        o.status <> 'completada' or exists (select 1 from public.claims c where c.order_id = o.id)
-        or exists (select 1 from public.cancellations c where c.order_id = o.id)
-      )
+  select not exists (
+    select 1 from public.orders o where o.request_id=p_solicitud and (
+      o.status not in ('completada','cancelada') or public.pedido_tiene_caso_pendiente(o.id)
+      or exists (select 1 from public.order_close_control a where a.order_id=o.id and a.reporte='pendiente')
     )
-    and not exists (select 1 from public.cancellations c where c.request_id = p_solicitud)
+  ) and not exists (
+    select 1 from public.cancellations c where (
+      c.request_id=p_solicitud or exists (select 1 from public.orders o where o.id=c.order_id and o.request_id=p_solicitud)
+    ) and not public.admin_cancelacion_archivable(c.id)
+  )
 $$;
 
 create or replace function public.admin_regla_archivo(p_tabla text)
 returns text language sql immutable set search_path = public, pg_temp as $$
   select case p_tabla
     when 'cancellations' then 'public.admin_cancelacion_archivable(r.id)'
-    when 'requests' then 'r.status = ''atendida'' and public.admin_venta_archivable(r.id)'
-    when 'offers' then 'r.status in (''aceptada'', ''rechazada'', ''reemplazada'', ''retirada'')
-      and public.admin_venta_archivable(r.request_id)'
-    when 'orders' then 'r.status = ''completada'' and public.admin_venta_archivable(r.request_id)'
+    when 'claims' then 'r.status in (''resuelto'',''cerrado'')
+      and not exists (select 1 from public.claim_returns d where d.claim_id=r.id and d.estado not in (''recibida'',''cerrada'',''confirmada''))
+      and (r.resolution not in (''intercambio'',''acuerdo_partes'',''sancion'') or r.resolution is null
+        or exists (select 1 from public.claim_returns d where d.claim_id=r.id)
+        or (r.resolution=''sancion'' and exists (select 1 from public.sanctions s where s.source_type=''reclamo'' and s.source_id=r.id)))
+      and (r.resolution is distinct from ''sancion'' or exists (select 1 from public.sanctions s where s.source_type=''reclamo'' and s.source_id=r.id))'
+    when 'sanctions' then 'r.appeal_status is distinct from ''pendiente''
+      and (r.revoked_at is not null or r.appeal_status=''aceptada'' or r.ends_at<=now())'
+    when 'requests' then 'r.status in (''atendida'',''vencida'',''cancelada'',''eliminada'')
+      and (r.status<>''atendida'' or exists (select 1 from public.orders o where o.request_id=r.id))
+      and public.admin_venta_archivable(r.id)'
+    when 'offers' then 'r.status in (''rechazada'',''reemplazada'',''retirada'') or
+      (r.status=''aceptada'' and exists (select 1 from public.orders o where o.request_id=r.request_id)
+        and public.admin_venta_archivable(r.request_id))'
+    when 'orders' then 'r.status in (''completada'',''cancelada'') and public.admin_venta_archivable(r.request_id)'
   end
 $$;
 
@@ -288,12 +307,12 @@ create or replace function public.admin_archivar_ventas(p_tabla text, p_ids uuid
 returns integer language plpgsql security definer set search_path = public, pg_temp as $$
 declare condicion text; cantidad integer;
 begin
-  if p_tabla is null or p_tabla not in ('requests', 'offers', 'orders') or not public.is_admin() then
+  if p_tabla is null or p_tabla not in ('requests','offers','orders','claims','sanctions') or not public.is_admin() then
     raise exception 'Se requiere acceso administrativo.' using errcode = '42501';
   end if;
   if coalesce(cardinality(p_ids), 0) not between 1 and 1000 then raise exception 'Selecciona entre 1 y 1000 registros.'; end if;
   condicion := public.admin_regla_archivo(p_tabla);
-  execute format('update public.%I r set admin_archived_at = now()
+  execute format('update public.%I r set admin_archived_at = now(), admin_conserva_historial=true
     where r.id = any($1) and r.admin_archived_at is null and (%s)', p_tabla, condicion) using p_ids;
   get diagnostics cantidad = row_count;
   if cantidad > 0 then
@@ -326,7 +345,7 @@ declare cantidad integer;
 begin
   if not public.is_admin() then raise exception 'Se requiere acceso administrativo.' using errcode = '42501'; end if;
   if coalesce(cardinality(p_ids), 0) not between 1 and 1000 then raise exception 'Selecciona entre 1 y 1000 registros.'; end if;
-  update public.cancellations c set admin_archived_at = now()
+  update public.cancellations c set admin_archived_at = now(), admin_conserva_historial=true
     where c.id = any(p_ids) and c.admin_archived_at is null and public.admin_cancelacion_archivable(c.id);
   get diagnostics cantidad = row_count;
   if cantidad > 0 then
@@ -407,11 +426,9 @@ begin
     'select %L::text as tabla, r.id, coalesce(nullif(d.datos->>''name'', ''''), nullif(d.datos->>''title'', ''''),
       nullif(d.datos->>''description'', ''''), nullif(d.datos->>''reason'', ''''), nullif(d.datos->>''decision'', ''''),
       nullif(d.datos->>''reason_text'', ''''), r.id::text) as titulo, r.admin_archived_at as archivado_en,
-      coalesce((%L = ''cancellations'' and d.datos->>''review_status'' = ''injustificada'')
-        or (%L = ''orders'' and d.datos->>''status'' = ''completada'')
-        or (%L in (''requests'', ''offers'') and not (%s)), false) as conservar
+      (r.admin_conserva_historial or (%s) is not true) as conservar
       from public.%I r cross join lateral (select to_jsonb(r) as datos) d where r.admin_archived_at is not null',
-    regla.tabla, regla.tabla, regla.tabla, regla.tabla, regla.elegible, regla.tabla), ' union all ')
+    regla.tabla, regla.elegible, regla.tabla), ' union all ')
     into consulta from public.admin_reglas_papelera() regla where p_tabla is null or regla.tabla = p_tabla;
   if consulta is null then raise exception 'Esta sección no admite papelera.'; end if;
   return query execute 'select * from (' || consulta || ') p order by archivado_en desc, tabla, id limit 26 offset $1' using p_offset;
@@ -425,7 +442,7 @@ begin
   if not exists (select 1 from public.admin_reglas_papelera() where tabla = p_tabla) then
     raise exception 'Esta sección no admite papelera.';
   end if;
-  execute format('update public.%I set admin_archived_at = null where id = $1 and admin_archived_at is not null', p_tabla)
+  execute format('update public.%I set admin_archived_at = null, admin_conserva_historial=false where id = $1 and admin_archived_at is not null', p_tabla)
     using p_id;
   get diagnostics cantidad = row_count;
   if cantidad = 0 then raise exception 'El registro ya no está en la papelera.'; end if;
@@ -438,11 +455,11 @@ declare regla record; registro record;
 begin
   for regla in select * from public.admin_reglas_papelera() loop
     for registro in execute format('select r.id from public.%I r
-      where r.admin_archived_at <= now() - interval ''360 hours'' and (%s)
+      where not r.admin_conserva_historial and r.admin_archived_at <= now() - interval ''360 hours'' and (%s)
       order by r.admin_archived_at for update skip locked limit 250', regla.tabla, regla.elegible) loop
       begin
         execute format('delete from public.%I r where r.id = $1
-          and r.admin_archived_at <= now() - interval ''360 hours'' and (%s)', regla.tabla, regla.elegible) using registro.id;
+          and not r.admin_conserva_historial and r.admin_archived_at <= now() - interval ''360 hours'' and (%s)', regla.tabla, regla.elegible) using registro.id;
       exception when foreign_key_violation then
         raise warning 'Se conserva %.% por una dependencia.', regla.tabla, registro.id;
       end;
@@ -634,9 +651,7 @@ returns setof uuid language sql stable security definer set search_path = public
     and not exists (select 1 from public.order_close_control a where a.order_id=o.id and a.reporte='pendiente')
     and ((p_seccion = 'compras' and o.buyer_id = auth.uid())
       or (p_seccion = 'pedidos_tienda' and o.store_id in (select public.tiendas_con_permiso('gestionar_pedidos'))))
-    and (o.status in ('completada','cancelada') or exists (
-      select 1 from public.claims c where c.order_id = o.id and c.status in ('resuelto','cerrado')
-    ))
+    and o.status in ('completada','cancelada')
     and not exists (
       select 1 from public.claims c left join public.claim_returns d on d.claim_id = c.id
       where c.order_id = o.id and (
@@ -826,3 +841,273 @@ begin
 end $$;
 revoke all on function public.restaurar_chat_desde_oferta(uuid) from public, anon;
 grant execute on function public.restaurar_chat_desde_oferta(uuid) to authenticated;
+
+-- El administrador registra la decisión de cierre antes de retirar un registro activo.
+create or replace function public.admin_cerrar_y_archivar(p_tabla text,p_id uuid,p_motivo text)
+returns void language plpgsql security definer set search_path=public,pg_temp as $$
+declare
+  motivo text := btrim(p_motivo);
+  pedido public.orders;
+  destino public.pedido_estado;
+  solicitud uuid;
+  sancion public.sanctions;
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Se requiere acceso administrativo.' using errcode='42501'; end if;
+  if coalesce(char_length(motivo),0) not between 5 and 3000 then raise exception 'Indica el motivo del cierre o revocación.'; end if;
+  if p_tabla='sanctions' then
+    select * into sancion from public.sanctions where id=p_id;
+    if sancion.store_id is null and sancion.source_type='otro' and sancion.source_id=sancion.user_id then
+      perform 1 from public.profiles where id=sancion.user_id for update;
+    end if;
+    perform 1 from public.sanctions where id=p_id and admin_archived_at is null
+      and appeal_status is distinct from 'pendiente' for update;
+    if not found then raise exception 'Resuelve la apelación antes de archivar la sanción.'; end if;
+    perform public.revocar_sancion(p_id,motivo);
+    if sancion.store_id is null and sancion.source_type='otro' and sancion.source_id=sancion.user_id
+      and exists(select 1 from public.profiles where id=sancion.user_id and not is_admin and admin_baja_at is null
+        and status=case when sancion.type='bloqueo' then 'bloqueado' else 'suspendido' end::public.cuenta_estado) then
+      perform public.admin_estado_usuario(sancion.user_id,'activo',motivo);
+    end if;
+    if public.admin_archivar_ventas('sanctions',array[p_id]) <> 1 then raise exception 'No se pudo archivar la sanción.'; end if;
+  elsif p_tabla='orders' then
+    select * into pedido from public.orders where id=p_id and admin_archived_at is null
+      and status not in ('completada','cancelada') for update;
+    if not found then raise exception 'El pedido activo ya no está disponible.'; end if;
+    if public.pedido_tiene_caso_pendiente(pedido.id) or exists(
+      select 1 from public.order_close_control where order_id=pedido.id and reporte='pendiente'
+    ) then raise exception 'Resuelve primero el reclamo, la devolución o el reporte de entrega pendiente.'; end if;
+    destino := case when pedido.status='entregado' then 'completada' else 'cancelada' end::public.pedido_estado;
+    insert into public.order_close_control(order_id,cierre_admin) values(pedido.id,motivo)
+      on conflict(order_id) do update set cierre_admin=excluded.cierre_admin;
+    update public.orders set status=destino where id=pedido.id;
+    insert into public.delivery_events(order_id,event,from_status,to_status,actor_id)
+      values(pedido.id,'estado',pedido.status,destino,auth.uid());
+    insert into public.notifications(user_id,type,title,body,payload)
+      select distinct usuario,'pedido_estado','Pedido cerrado por administración',motivo,
+        jsonb_build_object('order_id',pedido.id,'para',rol)
+      from (select pedido.buyer_id as usuario,'comprador' as rol
+        union all select q.u,'vendedor' from public.usuarios_con_permiso(pedido.store_id,'gestionar_pedidos') q(u)) partes;
+    if public.admin_archivar_ventas('orders',array[p_id]) <> 1 then
+      raise exception 'Hay una cancelación o un trámite relacionado que requiere revisión.';
+    end if;
+  elsif p_tabla in ('requests','offers') then
+    solicitud := case when p_tabla='requests' then p_id else (select request_id from public.offers where id=p_id) end;
+    perform 1 from public.requests where id=solicitud for update;
+    if not found then raise exception 'No se encontró la solicitud.'; end if;
+    if exists(select 1 from public.orders where request_id=solicitud) then
+      raise exception 'Cierra primero la operación vinculada.';
+    end if;
+    if p_tabla='requests' then
+      update public.requests set status='eliminada'
+      where id=solicitud and status in ('abierta','con_ofertas') and admin_archived_at is null;
+      if not found then raise exception 'La solicitud ya no está abierta.'; end if;
+      update public.offers set status='retirada' where request_id=solicitud and status='enviada';
+    else
+      update public.offers set status='retirada'
+      where id=p_id and request_id=solicitud and status='enviada' and admin_archived_at is null;
+      if not found then raise exception 'La oferta ya no está pendiente.'; end if;
+    end if;
+    if public.admin_archivar_ventas(p_tabla,array[p_id]) <> 1 then raise exception 'No se pudo archivar el registro.'; end if;
+  else raise exception 'Este apartado requiere resolver el registro desde su propia ficha.';
+  end if;
+  perform public.registrar_auditoria('cerrar_y_archivar',p_tabla,p_id::text,jsonb_build_object('motivo',motivo));
+end $$;
+revoke all on function public.admin_cerrar_y_archivar(text,uuid,text) from public,anon;
+grant execute on function public.admin_cerrar_y_archivar(text,uuid,text) to authenticated;
+
+-- Limpieza explícita por secciones. TRUNCATE se ejecuta sin CASCADE sobre una lista fija.
+create or replace function public.admin_tablas_limpieza()
+returns table(seccion text, tabla text) language sql immutable set search_path=public,pg_temp as $$
+  values
+    ('cuentas','profiles'), ('identidad','identity_verifications'), ('equipo','admin_invitaciones'),
+    ('tiendas','stores'), ('tiendas','store_photos'), ('tiendas','store_members'),
+    ('categorias','categories'), ('productos','products'), ('productos','product_images'), ('productos','product_tags'),
+    ('negociaciones','requests'), ('negociaciones','request_images'), ('negociaciones','request_matches'),
+    ('negociaciones','offers'), ('negociaciones','offer_history'),
+    ('pedidos','orders'), ('pedidos','order_items'), ('pedidos','delivery_evidence'), ('pedidos','delivery_codes'),
+    ('pedidos','delivery_code_attempts'), ('pedidos','delivery_events'), ('pedidos','pedidos_con_reclamo'), ('pedidos','order_close_control'),
+    ('chat','conversations'), ('chat','messages'), ('chat','message_reads'),
+    ('reclamos','claims'), ('reclamos','claim_responses'), ('reclamos','claim_evidence'), ('reclamos','claim_returns'), ('reclamos','claim_movements'),
+    ('cancelaciones','cancellations'), ('sanciones','sanctions'), ('reputacion','ratings'), ('reputacion','rating_reports'),
+    ('notificaciones','notifications'), ('notificaciones','notificaciones_tope_borradas'),
+    ('promociones','promotions'), ('planes','subscriptions'), ('planes','subscription_plans'), ('auditoria','audit_logs')
+$$;
+
+create table if not exists public.admin_limpieza (
+  id uuid primary key default gen_random_uuid(),
+  creada_por uuid not null,
+  cuentas uuid[] not null default '{}',
+  completada_at timestamptz
+);
+create unique index if not exists admin_limpieza_una_pendiente
+  on public.admin_limpieza ((true)) where completada_at is null;
+create table if not exists public.admin_limpieza_archivos (
+  limpieza uuid not null references public.admin_limpieza(id) on delete cascade,
+  bucket text not null,
+  nombre text not null,
+  primary key(limpieza,bucket,nombre)
+);
+alter table public.admin_limpieza enable row level security;
+alter table public.admin_limpieza_archivos enable row level security;
+revoke all on public.admin_limpieza, public.admin_limpieza_archivos from public,anon,authenticated;
+
+create or replace function public.admin_archivos_limpieza(p_secciones text[])
+returns table(bucket text,nombre text) language sql stable security definer set search_path=public,pg_temp as $$
+  select o.bucket_id,o.name from storage.objects o
+  where case o.bucket_id
+    when 'identity-private' then 'identidad'=any(p_secciones) and split_part(o.name,'/',1)<>auth.uid()::text
+      and not exists (select 1 from public.identity_verifications v where v.user_id=auth.uid()
+        and o.name in (v.dni_photo_path,v.selfie_path))
+    when 'public-catalog' then 'tiendas'=any(p_secciones) or ('productos'=any(p_secciones) and (
+      split_part(o.name,'/',2) like 'p-%' or exists(select 1 from public.product_images i where i.path=o.name)
+    ))
+    when 'request-images' then 'negociaciones'=any(p_secciones)
+    when 'offer-images' then 'negociaciones'=any(p_secciones)
+    when 'chat-private' then 'chat'=any(p_secciones)
+    when 'delivery-evidence' then 'pedidos'=any(p_secciones)
+    when 'claim-evidence' then case split_part(o.name,'/',1)
+      when 'cancelaciones' then 'cancelaciones'=any(p_secciones)
+      when 'entregas-sin-codigo' then 'pedidos'=any(p_secciones)
+      else 'reclamos'=any(p_secciones) end
+    else false end
+$$;
+
+create or replace function public.admin_alcance_limpieza(p_secciones text[])
+returns text[] language plpgsql stable set search_path=public,pg_temp as $$
+declare alcance text[];
+begin
+  if coalesce(cardinality(p_secciones),0)=0 or exists (
+    select 1 from unnest(p_secciones) s where s is null or not exists(select 1 from public.admin_tablas_limpieza() t where t.seccion=s)
+  ) then raise exception 'Selecciona secciones válidas.'; end if;
+  with recursive tablas as (select t.seccion,to_regclass('public.'||t.tabla)::oid as id from public.admin_tablas_limpieza() t),
+  dependencias as (
+    select distinct destino.seccion as d, origen.seccion as o from pg_constraint f
+    join tablas origen on origen.id=f.confrelid join tablas destino on destino.id=f.conrelid
+    where f.contype='f' and origen.seccion<>destino.seccion
+    union select 'sanciones','reclamos' union select 'sanciones','cancelaciones'
+  ),
+  todo(seccion) as (
+    select unnest(p_secciones) union select d.d from dependencias d join todo t on t.seccion=d.o
+  )
+  select array_agg(seccion order by seccion) into alcance from todo;
+  return alcance;
+end $$;
+
+create or replace function public.admin_previsualizar_limpieza(p_secciones text[])
+returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+declare alcance text[]; fila record; cantidad bigint; conteos jsonb:='{}'; archivos bigint;
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Solo el administrador titular puede vaciar datos.' using errcode='42501'; end if;
+  alcance:=public.admin_alcance_limpieza(p_secciones);
+  for fila in select distinct seccion from public.admin_tablas_limpieza() where seccion=any(alcance) loop
+    if fila.seccion='cuentas' then
+      select count(*) into cantidad from auth.users where id<>auth.uid();
+    else
+      execute (select 'select sum(n) from (' || string_agg(format('select count(*) n from public.%I%s',tabla,
+        case when tabla='identity_verifications' then ' where user_id<>auth.uid()' else '' end),' union all ') || ') c'
+        from public.admin_tablas_limpieza() where seccion=fila.seccion) into cantidad;
+    end if;
+    if fila.seccion=(case when 'tiendas'=any(alcance) then 'tiendas' else 'categorias' end) then
+      cantidad:=cantidad+(select count(*) from public.store_categories);
+    end if;
+    conteos:=conteos||jsonb_build_object(fila.seccion,cantidad);
+  end loop;
+  select count(*) into archivos from public.admin_archivos_limpieza(alcance);
+  return jsonb_build_object('secciones',alcance,'conteos',conteos,'archivos',archivos);
+end $$;
+
+create or replace function public.admin_ejecutar_limpieza(p_secciones text[],p_vista jsonb,p_confirmacion text)
+returns uuid language plpgsql security definer set search_path=public,pg_temp as $$
+declare alcance text[]; tablas text; bloqueo text; trabajo uuid; protegida uuid:=auth.uid(); cuentas uuid[];
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Solo el administrador titular puede vaciar datos.' using errcode='42501'; end if;
+  if p_confirmacion is distinct from 'BORRAR DATOS' then raise exception 'Confirma escribiendo BORRAR DATOS.'; end if;
+  perform pg_advisory_xact_lock(640151);
+  if exists(select 1 from public.admin_limpieza where completada_at is null) then raise exception 'Ya existe una limpieza pendiente. Reanúdala antes de iniciar otra.'; end if;
+  alcance:=public.admin_alcance_limpieza(p_secciones);
+  select string_agg(format('public.%I',tabla),',' order by tabla),
+    string_agg(format('public.%I',tabla),',' order by tabla) filter(where tabla not in ('profiles','identity_verifications'))
+    into bloqueo,tablas from public.admin_tablas_limpieza() where seccion=any(alcance);
+  if alcance && array['tiendas','categorias'] then
+    bloqueo:=bloqueo||',public.store_categories';
+    tablas:=concat_ws(',',tablas,'public.store_categories');
+  end if;
+  execute 'lock table '||bloqueo||' in access exclusive mode';
+  if 'cuentas'=any(alcance) then lock table auth.users in share row exclusive mode; end if;
+  if public.admin_previsualizar_limpieza(p_secciones) is distinct from p_vista then
+    raise exception 'Los datos cambiaron. Revisa una nueva vista previa.';
+  end if;
+  select coalesce(array_agg(id),'{}') into cuentas from auth.users where 'cuentas'=any(alcance) and id<>protegida;
+  insert into public.admin_limpieza(creada_por,cuentas) values(protegida,cuentas) returning id into trabajo;
+  insert into public.admin_limpieza_archivos(limpieza,bucket,nombre)
+    select trabajo,bucket,nombre from public.admin_archivos_limpieza(alcance);
+  if tablas is not null then execute 'truncate table '||tablas; end if;
+  if 'identidad'=any(alcance) then delete from public.identity_verifications where user_id<>protegida; end if;
+  if 'cuentas'=any(alcance) then
+    update auth.users set banned_until='infinity' where id=any(cuentas);
+    delete from auth.sessions where user_id=any(cuentas);
+    update public.identity_verifications set reviewed_by=null where user_id=protegida and reviewed_by=any(cuentas);
+    delete from public.profiles where id=any(cuentas);
+  end if;
+  delete from public.comprador_ocultos where
+    ('negociaciones'=any(alcance) and seccion in ('solicitudes','bandeja_ofertas','ofertas','ofertas_tienda'))
+    or ('pedidos'=any(alcance) and seccion in ('compras','pedidos_tienda'))
+    or ('chat'=any(alcance) and seccion in ('chat','chat_tienda'))
+    or ('reclamos'=any(alcance) and seccion in ('reclamo','reclamos_tienda'))
+    or ('cancelaciones'=any(alcance) and seccion='cancelacion')
+    or ('sanciones'=any(alcance) and seccion='sancion')
+    or ('reputacion'=any(alcance) and seccion='calificaciones');
+  perform public.registrar_auditoria('vaciar_datos','limpieza',trabajo::text,p_vista);
+  return trabajo;
+end $$;
+
+create or replace function public.admin_limpieza_pendiente()
+returns uuid language sql stable security definer set search_path=public,pg_temp as $$
+  select id from public.admin_limpieza where completada_at is null and public.is_admin() and public.cuenta_activa()
+$$;
+
+create or replace function public.admin_lote_limpieza(p_id uuid)
+returns table(bucket text,nombre text) language sql stable security definer set search_path=public,pg_temp as $$
+  select a.bucket,a.nombre from public.admin_limpieza_archivos a
+  join public.admin_limpieza l on l.id=a.limpieza
+  join storage.objects o on o.bucket_id=a.bucket and o.name=a.nombre
+  where l.id=p_id and l.completada_at is null and public.is_admin() and public.cuenta_activa()
+  order by a.bucket,a.nombre limit 100
+$$;
+
+create or replace function public.admin_finalizar_limpieza(p_id uuid)
+returns void language plpgsql security definer set search_path=public,pg_temp as $$
+declare trabajo public.admin_limpieza;
+begin
+  if not public.is_admin() or not public.cuenta_activa() then raise exception 'Se requiere acceso administrativo.' using errcode='42501'; end if;
+  select * into trabajo from public.admin_limpieza where id=p_id for update;
+  if not found then raise exception 'No se encontró la limpieza.'; end if;
+  if trabajo.completada_at is not null then return; end if;
+  if exists(select 1 from public.admin_lote_limpieza(p_id)) then raise exception 'Aún quedan archivos por borrar.'; end if;
+  delete from auth.users where id=any(trabajo.cuentas) and id<>auth.uid() and id<>trabajo.creada_por;
+  delete from public.admin_limpieza_archivos where limpieza=p_id;
+  update public.admin_limpieza set completada_at=now(),cuentas='{}' where id=p_id;
+end $$;
+
+create or replace function public.admin_puede_borrar_archivo_limpieza(p_bucket text,p_nombre text)
+returns boolean language sql stable security definer set search_path=public,pg_temp as $$
+  select public.is_admin() and public.cuenta_activa() and exists (
+    select 1 from public.admin_limpieza_archivos a join public.admin_limpieza l on l.id=a.limpieza
+    where l.completada_at is null and a.bucket=p_bucket and a.nombre=p_nombre
+  )
+$$;
+drop policy if exists admin_limpieza_storage_select on storage.objects;
+create policy admin_limpieza_storage_select on storage.objects for select to authenticated
+  using(public.admin_puede_borrar_archivo_limpieza(bucket_id,name));
+drop policy if exists admin_limpieza_storage_delete on storage.objects;
+create policy admin_limpieza_storage_delete on storage.objects for delete to authenticated
+  using(public.admin_puede_borrar_archivo_limpieza(bucket_id,name));
+
+revoke all on function public.admin_tablas_limpieza(), public.admin_alcance_limpieza(text[]),
+  public.admin_archivos_limpieza(text[]) from public,anon,authenticated;
+revoke all on function public.admin_previsualizar_limpieza(text[]), public.admin_ejecutar_limpieza(text[],jsonb,text),
+  public.admin_limpieza_pendiente(), public.admin_lote_limpieza(uuid),public.admin_finalizar_limpieza(uuid),
+  public.admin_puede_borrar_archivo_limpieza(text,text) from public,anon;
+grant execute on function public.admin_previsualizar_limpieza(text[]),public.admin_ejecutar_limpieza(text[],jsonb,text),
+  public.admin_limpieza_pendiente(),public.admin_lote_limpieza(uuid),public.admin_finalizar_limpieza(uuid),
+  public.admin_puede_borrar_archivo_limpieza(text,text) to authenticated;

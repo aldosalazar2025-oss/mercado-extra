@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import type { EstadoPedido } from "./tipos";
 
 export type ControlCierre = {
+  reclamo_iniciado: boolean;
   reporte: "pendiente" | "aceptado" | "rechazado" | null;
   evidencia: string | null;
   nota_reporte: string | null;
@@ -39,6 +40,7 @@ export default function CierrePedido({ id, uid, rol, estado, control }: {
   const confirmar = useCasosMutation(() => ejecutar(rol === "comprador" ? "confirmar_comprador" : "confirmar_tienda"));
   const pendiente = control?.reporte === "pendiente";
   const reportable = rol === "vendedor" && !pendiente && ["enviado_o_listo", "pendiente_confirmacion"].includes(estado);
+  const viaReclamo = control?.reclamo_iniciado === true;
   const miConfirmacion = rol === "comprador" ? control?.comprador_confirmo_at : control?.tienda_confirmo_at;
   if (!control && !reportable && estado !== "entregado") return null;
   return (
@@ -58,7 +60,10 @@ export default function CierrePedido({ id, uid, rol, estado, control }: {
         <summary className="cursor-pointer font-bold text-mercado">Reportar entrega sin código</summary>
         <AdjuntarEvidencia id={id} uid={uid} entregaSinCodigo />
       </details>}
-      {(estado === "entregado" || control?.comprador_confirmo_at || control?.tienda_confirmo_at) && (
+      {viaReclamo && estado !== "completada" && estado !== "cancelada" && <p className="rounded-lg bg-maiz-suave p-3 text-sm">
+        Este pedido se finaliza según la resolución y los pasos de Reclamos.
+      </p>}
+      {!viaReclamo && (estado === "entregado" || control?.comprador_confirmo_at || control?.tienda_confirmo_at) && (
         <ul className="space-y-1 text-sm">
           <li>Comprador · {control?.comprador_confirmo_at ? "Confirmado" : "Por confirmar"}</li>
           <li>Tienda · {control?.tienda_confirmo_at ? "Confirmado" : "Por confirmar"}</li>
@@ -66,16 +71,17 @@ export default function CierrePedido({ id, uid, rol, estado, control }: {
       )}
       {control?.intervencion && <p className="whitespace-pre-wrap break-words text-sm">Intervención solicitada · {control.intervencion}</p>}
       {control?.cierre_admin && <p className="whitespace-pre-wrap break-words text-sm">Cierre administrativo · {control.cierre_admin}</p>}
+      {rol === "admin" && viaReclamo && !pendiente && ["enviado_o_listo", "pendiente_confirmacion"].includes(estado) &&
+        <FormularioCaso titulo="Cerrar pedido sin entrega confirmada" etiquetaTexto="Motivo para cerrar el pedido como cancelado"
+          confirmar ejecutar={(nota) => ejecutar("cerrar_sin_entrega", nota)} />}
       {estado === "entregado" && !pendiente && (rol === "admin" ? (
-        <FormularioCaso titulo="Cerrar operación como administrador" etiquetaTexto="Motivo del cierre administrativo"
+        (viaReclamo || control?.intervencion) && <FormularioCaso titulo="Cerrar operación como administrador" etiquetaTexto="Motivo del cierre administrativo"
           confirmar ejecutar={(nota) => ejecutar("cerrar_admin", nota)} />
-      ) : <>
+      ) : !viaReclamo && <>
         {!miConfirmacion && <Boton variante="secundario" type="button" disabled={confirmar.isPending} onClick={() => {
           if (confirm(rol === "comprador" ? "¿Confirmas que recibiste lo acordado?" : "¿Confirmas que cumpliste con la entrega?")) confirmar.mutate();
         }}>{rol === "comprador" ? "Confirmar que recibí lo acordado" : "Confirmar que cumplí con la entrega"}</Boton>}
         {confirmar.isError && <p role="alert" className="text-sm text-error">{confirmar.error.message}</p>}
-        {!control?.intervencion && <FormularioCaso titulo="Solicitar intervención" etiquetaTexto="Motivo de la solicitud"
-          ejecutar={(nota) => ejecutar("intervenir", nota)} />}
       </>)}
     </section>
   );

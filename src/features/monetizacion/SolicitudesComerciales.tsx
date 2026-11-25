@@ -81,7 +81,7 @@ export default function SolicitudesComerciales({ tipo, admin = false, tienda }: 
   const tabla = tipo === "plan" ? "subscriptions" : "promotions";
   const acciones = useAccionesPapelera(tabla, admin ? consulta.data?.filas.map((fila) => fila.id) ?? [] : []);
   const seleccion = useSeleccionPapelera(JSON.stringify([tipo, estado, pagina]),
-    admin && estado ? consulta.data?.filas.map((fila) => fila.id) ?? [] : []);
+    admin && acciones ? [...acciones.keys()] : []);
   return (
     <div className="space-y-3">
       {admin && <FiltroEstado estados={tipo === "plan" ? ["pendiente", "activa", "cancelada", "vencida"] : ["pendiente", "activa", "rechazada", "pausada", "vencida"]}

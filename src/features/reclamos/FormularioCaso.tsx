@@ -3,6 +3,7 @@ import Boton from "@/components/Boton";
 import { accion, motivos, useCasosMutation } from "./casos";
 
 type Props = {
+  destinoId?: string;
   titulo: string;
   boton?: string;
   etiquetaTexto?: string;
@@ -15,7 +16,7 @@ type Props = {
   repetir?: boolean;
 };
 
-export function FormularioCaso({ titulo, boton = titulo, etiquetaTexto = "Explicación", minimo = 5, opciones, ejecutar, confirmar, pedirDias, destinatario, repetir }: Props) {
+export function FormularioCaso({ destinoId, titulo, boton = titulo, etiquetaTexto = "Explicación", minimo = 5, opciones, ejecutar, confirmar, pedirDias, destinatario, repetir }: Props) {
   const [texto, setTexto] = useState("");
   const [opcion, setOpcion] = useState(opciones?.[0]?.[0] ?? "");
   const [dias, setDias] = useState(7);
@@ -31,7 +32,7 @@ export function FormularioCaso({ titulo, boton = titulo, etiquetaTexto = "Explic
 
   if (envio.isSuccess && !repetir) return <p role="status" className="text-sm text-pino">Acción registrada.</p>;
   return (
-    <details className="rounded-lg border border-borde p-3">
+    <details id={destinoId} tabIndex={destinoId ? -1 : undefined} className="rounded-lg border border-borde p-3">
       <summary className="cursor-pointer font-bold text-mercado">{titulo}</summary>
       <form className="mt-3 space-y-3" onSubmit={(event) => {
         event.preventDefault();

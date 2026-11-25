@@ -1,16 +1,17 @@
+import TachoBaja from "@/features/admin/TachoBaja";
 import DevolucionReclamo, { devolucionPendiente, type Devolucion } from "./DevolucionReclamo";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Boton, { clasesBoton } from "@/components/Boton";
 import FiltroEstado from "@/components/FiltroEstado";
 import { AccionHistorial, SeleccionHistorial, useHistorialPersonal } from "@/features/comprador/HistorialPersonal";
-import { AccionesTarjeta, SeleccionPapelera, useAccionesPapelera, useSeleccionPapelera } from "@/features/admin/PapeleraAdmin";
+import { AccionesTarjeta, TachoParaResolver, SeleccionPapelera, useAccionesPapelera, useSeleccionPapelera } from "@/features/admin/PapeleraAdmin";
 import type { ReactNode } from "react";
 import { rutaPedido } from "@/features/pedidos/tipos";
 import { supabase } from "@/lib/supabase";
 import { accion, etiqueta, motivos, resoluciones, tablaCasos, tiposReclamo, tiposSancion, useCasosMutation, useUid } from "./casos";
-import { AdjuntarEvidencia, ArchivosCaso } from "./EvidenciasCaso";
+import { AdjuntarEvidencia, ArchivosCaso, useArchivosCaso } from "./EvidenciasCaso";
 import ContextoPedido from "./ContextoPedido";
 import { FormularioCaso } from "./FormularioCaso";
 
@@ -19,18 +20,22 @@ type Base = { id: string; created_at: string };
 type Reclamo = Base & {
   order_id: string; buyer_id: string; store_id: string; type: string; description: string; status: string; resolution: string | null;
   resolution_note: string | null;
+  resolved_at: string | null;
+  revisor: PersonaCaso;
   comprador: { full_name: string } | null;
-  tienda: { name: string } | null;
+  tienda: { name: string; owner_id: string } | null;
   devolucion: Devolucion | null;
   pedido_devolucion: { status: string } | null;
-  claim_evidence: { file_path: string }[];
-  claim_responses: { id: string; author_id: string; body: string; created_at: string }[];
+  claim_movements: { id: number; actor_id: string | null; actor_rol: string; etapa: string; creado_en: string }[];
+  claim_evidence: { id: string; author_id: string; file_path: string; kind: string; created_at: string; autor: { full_name: string; is_admin: boolean } | null }[];
+  claim_responses: { id: string; author_id: string; body: string; created_at: string; is_appeal: boolean; autor: PersonaCaso }[];
 };
 type PersonaCaso = { full_name: string } | null;
 
 type Cancelacion = Base & {
   order_id: string | null; request_id: string | null; cancelled_by: string; reason_code: string; reason_text: string | null;
   review_status: string; report_text: string | null; response_text: string | null; review_note: string | null; evidence_paths: string[];
+  datos_cancelador?: { id: string; nombre: string | null; parte: string | null; tienda: string | null };
   cancelador?: PersonaCaso; denunciante?: PersonaCaso; revisor?: PersonaCaso;
   reported_by?: string | null;
   pedido?: { buyer_id: string; tienda: { name: string } | null } | null;
@@ -73,7 +78,7 @@ function EstadoCaso({ estado, creado, resaltar }: { estado: string; creado: stri
 function FormularioSancion({ id, origen, destinatario }: {
   id: string; origen: "reclamo" | "cancelacion" | "usuario" | "tienda"; destinatario: string;
 }) {
-  return <FormularioCaso titulo="Aplicar sanción" opciones={tiposSancion} pedirDias confirmar destinatario={destinatario}
+  return <FormularioCaso destinoId={`sancionar-${id}`} titulo="Aplicar sanción" opciones={tiposSancion} pedirDias confirmar destinatario={destinatario}
     etiquetaTexto="Motivo de la sanción"
     ejecutar={(texto, tipo, dias, horas) => accion("aplicar_sancion", {
       p_id: id, p_origen: origen, p_tipo: tipo, p_dias: dias, p_horas: horas, p_motivo: texto,
@@ -149,23 +154,65 @@ function SancionManual({ uid }: { uid: string }) {
   );
 }
 
+function EvidenciasReclamo({ evidencias }: { evidencias: Reclamo["claim_evidence"] }) {
+  const archivos = useArchivosCaso(evidencias.map((archivo) => archivo.file_path));
+  const urls = new Map(archivos.data?.map((archivo) => [archivo.path, archivo.signedUrl]));
+  if (!evidencias.length) return <p className="text-sm text-suave">Sin archivos adjuntos.</p>;
+  return (
+    <ul className="grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3" aria-label="Evidencias adjuntas">
+      {evidencias.map((archivo, indice) => {
+        const url = urls.get(archivo.file_path);
+        const tipo = archivo.kind === "foto" ? "Foto" : archivo.kind === "video" ? "Video" : "Documento";
+        return (
+          <li key={archivo.id} className="min-w-0 space-y-1 rounded-lg border border-borde bg-white p-2 text-sm">
+            {url && archivo.kind === "foto" && <img src={url} alt={`Foto adjunta ${indice + 1}`}
+              loading="lazy" className="aspect-square w-full rounded-md object-cover" />}
+            {url && archivo.kind === "video" && <video src={url} controls preload="metadata" aria-label={`Video adjunto ${indice + 1}`}
+              className="aspect-square w-full rounded-md bg-slate-900 object-contain" />}
+            {url && archivo.kind === "documento" && <span className="flex aspect-square items-center justify-center rounded-md bg-hoja font-bold text-pino">PDF</span>}
+            {url ? <a href={url} target="_blank" rel="noreferrer" className="font-semibold text-mercado underline">Ver {tipo.toLowerCase()} {indice + 1}</a>
+              : <p className="text-suave">{archivos.isPending ? "Cargando evidencia…" : "Archivo no disponible."}</p>}
+            <time dateTime={archivo.created_at} className="block text-xs text-suave">{fecha(archivo.created_at)}</time>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function TextoRespuesta({ respuestas, uid }: { respuestas: Reclamo["claim_responses"]; uid: string }) {
+  return <>
+    {respuestas.map((respuesta) => <div key={respuesta.id} className="space-y-1">
+      <p className="whitespace-pre-wrap break-words rounded-lg bg-white p-3 text-sm">{respuesta.body}</p>
+      <p className="text-xs text-suave"><time dateTime={respuesta.created_at}>{fecha(respuesta.created_at)}</time>
+        {respuesta.author_id === uid ? " · Respondiste tú" : respuesta.autor?.full_name && ` · ${respuesta.autor.full_name}`}</p>
+    </div>)}
+  </>;
+}
+
 function FichaReclamo({ caso, rol, uid, puedeResponder, acciones, enPedido }: { caso: Reclamo; enPedido: boolean; rol: Rol; uid: string; puedeResponder: boolean; acciones?: ReactNode }) {
   const abierto = caso.status === "abierto" || caso.status === "en_revision";
   const revisar = useCasosMutation(async () => accion("revisar_reclamo", { p_id: caso.id, p_resolucion: null, p_nota: null }));
-  const respuestas = [...caso.claim_responses].sort((a, b) => a.created_at.localeCompare(b.created_at));
+
   const color = caso.status === "abierto" ? "bg-amber-100 text-amber-900"
     : caso.status === "en_revision" ? "bg-blue-100 text-blue-900" : "bg-hoja text-pino";
   const entregado = ["entregado", "completada"].includes(caso.pedido_devolucion?.status ?? "");
+  const respuestas = caso.claim_responses.filter((respuesta) => respuesta.author_id !== caso.buyer_id)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const evidenciasComprador = caso.claim_evidence.filter((archivo) => archivo.author_id === caso.buyer_id);
+  const otrasEvidencias = caso.claim_evidence.filter((archivo) => archivo.author_id !== caso.buyer_id);
+  const evidenciasAdmin = otrasEvidencias.filter((archivo) =>
+    archivo.author_id !== caso.tienda?.owner_id && !respuestas.some((respuesta) => respuesta.author_id === archivo.author_id)
+    && (archivo.autor?.is_admin || caso.claim_movements.some((evento) =>
+      evento.etapa === "evidencia" && evento.actor_id === archivo.author_id
+      && evento.creado_en === archivo.created_at && evento.actor_rol === "Administración")));
+  const evidenciasTienda = otrasEvidencias.filter((archivo) => !evidenciasAdmin.includes(archivo));
+  const responder = abierto && puedeResponder && caso.buyer_id !== uid && !respuestas.some((respuesta) => !respuesta.is_appeal);
   const opcionesResolucion = [
-    ["cerrado_sin_incumplimiento", "Cierre sin incumplimiento"],
-    ["acuerdo_partes:compra", "Acuerdo · Continuar la compra"],
-    ["sancion:compra", "Incumplimiento con sanción · Continuar la compra"],
-    ...(entregado ? [
-      ["intercambio:intercambio", "Intercambio del producto"],
-      ["acuerdo_partes:devolucion", "Acuerdo · Devolver el producto"],
-      ["sancion:devolucion", "Incumplimiento con sanción · Devolver el producto"],
-      ["sancion:intercambio", "Incumplimiento con sanción · Cambiar el producto"],
-    ] as const : []),
+    ["cerrado_sin_incumplimiento:compra", "Continuar entrega sin incumplimiento"],
+    ["sancion:compra", "Continuar entrega con sanción"],
+    ["intercambio:intercambio", "Intercambio del producto"],
+    ["acuerdo_partes:devolucion", "Devolución del producto y del dinero"],
   ] as const;
   const tieneAcciones = abierto || (rol === "admin" && caso.resolution === "sancion");
   return (
@@ -176,12 +223,13 @@ function FichaReclamo({ caso, rol, uid, puedeResponder, acciones, enPedido }: { 
           <p className="text-sm text-suave">Presentado el <time dateTime={caso.created_at}>{fecha(caso.created_at)}</time></p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-sm font-bold capitalize ${color}`}>{etiqueta(caso.status)}</span>
+          <span className={`rounded-full px-3 py-1 text-sm font-bold capitalize ${color}`}>{devolucionPendiente(caso.devolucion) ? "En seguimiento" : etiqueta(caso.status)}</span>
           {acciones}
         </div>
       </header>
 
       <section className="space-y-3 rounded-lg bg-hoja/40 p-4">
+        <h4 className="font-bold text-pino">Reclamo del comprador</h4>
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="min-w-0">
             <dt className="font-bold text-pino">Comprador que presentó el reclamo</dt>
@@ -195,68 +243,67 @@ function FichaReclamo({ caso, rol, uid, puedeResponder, acciones, enPedido }: { 
         <div className="space-y-1 border-t border-borde pt-3">
           <h4 className="text-sm font-bold text-pino">Descripción del reclamo</h4>
           <p className="whitespace-pre-wrap break-words">{caso.description}</p>
+          <TextoRespuesta respuestas={caso.claim_responses.filter((respuesta) => respuesta.author_id === caso.buyer_id)} uid={uid} />
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm font-bold text-pino">Evidencias del comprador</p>
+          <EvidenciasReclamo evidencias={evidenciasComprador} />
+          {abierto && rol === "comprador" && <AdjuntarEvidencia id={caso.id} uid={uid} />}
         </div>
       </section>
 
       {rol === "admin"
-        ? <ContextoPedido key={caso.order_id} id={caso.order_id} compradorId={caso.buyer_id} comprador={caso.comprador?.full_name} />
+        ? <div className="space-y-2">
+          <ContextoPedido key={caso.order_id} id={caso.order_id} compradorId={caso.buyer_id} comprador={caso.comprador?.full_name} />
+          {!entregado && <Link className={clasesBoton("contorno")} to={`/admin/operaciones?id=${caso.order_id}`}>Revisar entrega en Operaciones</Link>}
+        </div>
         : enPedido
           ? <Boton type="button" variante="contorno" onClick={() => document.getElementById("resumen-del-pedido")?.scrollIntoView({ block: "start" })}>Ver pedido</Boton>
           : <Link className={clasesBoton("contorno")} to={rutaPedido(rol, caso.order_id)} state={{ desdeReclamos: true }}>Ver pedido</Link>}
 
-      <section className="space-y-2">
-        <h4 className="font-bold text-pino">Respuestas al reclamo</h4>
-        {respuestas.length === 0 ? <p className="text-sm text-suave">Todavía no hay respuestas.</p> : (
-          <ol className="space-y-2">
-            {respuestas.map((r) => {
-              const comprador = r.author_id === caso.buyer_id;
-              const nombre = comprador ? caso.comprador?.full_name : caso.tienda?.name;
-              return (
-                <li key={r.id} className="space-y-2 rounded-lg border border-borde p-3">
-                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-sm">
-                    <p className="break-words font-semibold text-pino">
-                      {comprador ? "Comentario del comprador" : "Respuesta de la tienda"}
-                      {nombre && ` · ${nombre}`}{r.author_id === uid && " (tú)"}
-                    </p>
-                    <time className="text-suave" dateTime={r.created_at}>{fecha(r.created_at)}</time>
-                  </div>
-                  <p className="whitespace-pre-wrap break-words text-sm">{r.body}</p>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
-
-      {(caso.claim_evidence.length > 0 || abierto) && (
-        <div className="space-y-3 rounded-lg border border-borde p-4">
-          <ArchivosCaso rutas={caso.claim_evidence.map((archivo) => archivo.file_path)} />
-          {abierto && <AdjuntarEvidencia id={caso.id} uid={uid} />}
+      <section className="space-y-3 rounded-lg border border-borde bg-hoja/20 p-4">
+        <h4 className="font-bold text-pino">Respuesta de la tienda{caso.tienda?.name && ` · ${caso.tienda.name}`}</h4>
+        {respuestas.length ? <TextoRespuesta respuestas={respuestas} uid={uid} />
+          : <p className="text-sm text-suave">La tienda todavía no ha respondido.</p>}
+        <div className="space-y-2">
+          <p className="text-sm font-bold text-pino">Evidencias de la tienda</p>
+          <EvidenciasReclamo evidencias={evidenciasTienda} />
+          {abierto && rol === "vendedor" && <AdjuntarEvidencia id={caso.id} uid={uid} />}
         </div>
-      )}
+        {responder && <FormularioCaso titulo="Responder al reclamo" minimo={1} ejecutar={async (texto) => {
+          const { error } = await supabase!.from("claim_responses").insert({ claim_id: caso.id, author_id: uid, body: texto });
+          if (error) throw new Error(error.code === "23505" ? "La tienda ya respondió este reclamo." : error.message);
+        }} />}
+      </section>
+      {(evidenciasAdmin.length > 0 || (abierto && rol === "admin")) && <section className="space-y-2 rounded-lg border border-borde p-4">
+        <h4 className="font-bold text-pino">Evidencias de administración</h4>
+        <EvidenciasReclamo evidencias={evidenciasAdmin} />
+        {abierto && rol === "admin" && <AdjuntarEvidencia id={caso.id} uid={uid} />}
+      </section>}
 
       {caso.resolution && <section className="space-y-1 rounded-lg bg-hoja/40 p-4">
         <h4 className="font-bold text-pino">Decisión administrativa</h4>
-        <p className="font-semibold">{resoluciones.find(([id]) => id === caso.resolution)?.[1] ?? etiqueta(caso.resolution)}</p>
+        {(caso.revisor?.full_name || caso.resolved_at) && <p className="flex flex-wrap gap-x-3 text-sm text-suave">
+          {caso.revisor?.full_name && <span>{caso.revisor.full_name}</span>}
+          {caso.resolved_at && <time dateTime={caso.resolved_at}>{fecha(caso.resolved_at)}</time>}
+        </p>}
+        <p className="font-semibold">{(caso.devolucion?.flujo_nuevo ? opcionesResolucion.find(([id]) => id.startsWith(`${caso.resolution}:`))?.[1] : resoluciones.find(([id]) => id === caso.resolution)?.[1]) ?? etiqueta(caso.resolution)}</p>
         {caso.resolution_note && <p className="whitespace-pre-wrap break-words">{caso.resolution_note}</p>}
       </section>}
 
       <DevolucionReclamo id={caso.id} uid={uid} rol={rol} devolucion={caso.devolucion}
-        entregado={entregado} resolucion={caso.resolution} />
+        comprador={caso.comprador?.full_name} tienda={caso.tienda?.name}
+        entregado={entregado} resolucion={caso.resolution} movimientos={caso.claim_movements} estadoReclamo={caso.status} />
 
-      {tieneAcciones && (rol === "admin" || (puedeResponder && caso.buyer_id !== uid)) && (
+      {rol === "vendedor" && caso.resolution === "sancion" &&
+        <Link className={clasesBoton("contorno")} to="/vendedor/sanciones">Consultar sanciones de la tienda</Link>}
+      {tieneAcciones && rol === "admin" && (
         <div className="space-y-2 border-t border-borde pt-4">
-          {abierto && puedeResponder && caso.buyer_id !== uid && (
-            <FormularioCaso titulo="Responder al reclamo" minimo={1} repetir ejecutar={async (texto) => {
-              const { error } = await supabase!.from("claim_responses").insert({ claim_id: caso.id, author_id: uid, body: texto });
-              if (error) throw new Error(error.message);
-            }} />
-          )}
           {rol === "admin" && caso.status === "abierto" && <>
             <Boton variante="contorno" disabled={revisar.isPending} onClick={() => revisar.mutate()}>Marcar en revisión</Boton>
             {revisar.isError && <p role="alert" className="text-error">{revisar.error.message}</p>}
           </>}
-          {rol === "admin" && abierto && <FormularioCaso titulo="Resolver reclamo" opciones={opcionesResolucion} confirmar etiquetaTexto="Motivo e instrucciones para las partes"
+          {rol === "admin" && abierto && <FormularioCaso destinoId={`resolver-${caso.id}`} titulo="Resolver reclamo" opciones={opcionesResolucion} confirmar etiquetaTexto="Motivo e instrucciones para las partes"
             ejecutar={(nota, opcion) => {
               const [resolucion, modalidad] = opcion.split(":");
               return accion("resolver_reclamo_con_seguimiento", { p_id: caso.id, p_resolucion: resolucion, p_nota: nota, p_modalidad: modalidad ?? null });
@@ -271,6 +318,9 @@ function FichaReclamo({ caso, rol, uid, puedeResponder, acciones, enPedido }: { 
 
 function FichaCancelacion({ caso, rol, uid, acciones }: { caso: Cancelacion; rol: Rol; uid: string; acciones?: ReactNode }) {
   const autor = caso.cancelled_by === uid;
+  const datosCancelador = caso.datos_cancelador;
+  const nombreCancelador = [datosCancelador?.parte, datosCancelador?.tienda, datosCancelador?.nombre]
+    .filter(Boolean).join(" · ");
   const pendiente = caso.review_status === "denunciada";
   const abierta = caso.review_status === "sin_revision";
   const Detalles = rol === "admin" ? "details" : "div";
@@ -311,7 +361,7 @@ function FichaCancelacion({ caso, rol, uid, acciones }: { caso: Cancelacion; rol
         <dl className="grid gap-3 rounded-lg bg-hoja/40 p-3 text-sm sm:grid-cols-2">
           <div>
             <dt className="font-bold text-pino">Quién canceló</dt>
-            <dd>{rol === "admin" ? identificarParte(caso.cancelled_by, caso.cancelador) : autor ? "Tú" : "Cuenta que canceló"}</dd>
+            <dd>{rol === "admin" ? identificarParte(caso.cancelled_by, caso.cancelador) : nombreCancelador ? `${nombreCancelador}${autor ? " (tú)" : ""}` : autor ? "Tú" : "Nombre no disponible"}</dd>
           </div>
           <div>
             <dt className="font-bold text-pino">{caso.order_id ? "Pedido relacionado" : "Solicitud relacionada"}</dt>
@@ -350,7 +400,7 @@ function FichaCancelacion({ caso, rol, uid, acciones }: { caso: Cancelacion; rol
         ejecutar={(texto) => accion("responder_cancelacion", { p_id: caso.id, p_texto: texto, p_denuncia: true })} />}
       {pendiente && autor && !caso.response_text && <FormularioCaso titulo="Responder a la denuncia"
         ejecutar={(texto) => accion("responder_cancelacion", { p_id: caso.id, p_texto: texto, p_denuncia: false })} />}
-      {pendiente && rol === "admin" && <FormularioCaso titulo="Resolver cancelación" confirmar
+      {pendiente && rol === "admin" && <FormularioCaso destinoId={`resolver-${caso.id}`} titulo="Resolver cancelación" confirmar
         opciones={[["justificada", "Justificada"], ["injustificada", "Injustificada"]]}
         ejecutar={(texto, opcion) => accion("revisar_cancelacion", { p_id: caso.id, p_justificada: opcion === "justificada", p_nota: texto })} />}
       {rol === "admin" && caso.review_status === "injustificada" && <AplicarSancion id={caso.id} origen="cancelacion"
@@ -426,7 +476,7 @@ function FichaSancion({ caso, rol, acciones }: { caso: Sancion; rol: Rol; accion
         ejecutar={(texto) => accion("revocar_sancion", { p_id: caso.id, p_motivo: texto })} />}
       {rol !== "admin" && !revocada && !caso.appeal_status && <FormularioCaso titulo="Apelar sanción"
         ejecutar={(texto) => accion("apelar_sancion", { p_id: caso.id, p_texto: texto })} />}
-      {rol === "admin" && !revocada && caso.appeal_status === "pendiente" && <div className="flex flex-wrap gap-2">
+      {rol === "admin" && !revocada && caso.appeal_status === "pendiente" && <div id={`apelar-${caso.id}`} tabIndex={-1} className="flex flex-wrap gap-2">
         <Boton disabled={decidir.isPending} onClick={() => { if (confirm("¿Aceptar la apelación?")) decidir.mutate(true); }}>Aceptar apelación</Boton>
         <Boton variante="contorno" disabled={decidir.isPending} onClick={() => { if (confirm("¿Rechazar la apelación?")) decidir.mutate(false); }}>Rechazar apelación</Boton>
       </div>}
@@ -442,7 +492,7 @@ const filtrosCaso: Record<Clase, string[]> = {
   sancion: ["activa", "vencida", "revocada", "programada"],
 };
 const select: Record<Clase, string> = {
-  reclamo: "id,order_id,buyer_id,store_id,type,description,status,resolution,resolution_note,created_at,comprador:profiles!claims_buyer_id_fkey(full_name),tienda:stores!claims_store_id_fkey(name),claim_evidence(file_path),claim_responses(id,author_id,body,created_at),devolucion:claim_returns(estado,modalidad,instrucciones,evidencia,evidencia_tienda,nota),pedido_devolucion:orders!claims_order_id_fkey(status)",
+  reclamo: "id,order_id,buyer_id,store_id,type,description,status,resolution,resolution_note,resolved_at,created_at,revisor:profiles!claims_resolved_by_fkey(full_name),comprador:profiles!claims_buyer_id_fkey(full_name),tienda:stores!claims_store_id_fkey(name,owner_id),claim_evidence(id,author_id,file_path,kind,created_at,autor:profiles!claim_evidence_author_id_fkey(full_name,is_admin)),claim_responses(id,author_id,body,created_at,is_appeal,autor:profiles!claim_responses_author_id_fkey(full_name)),devolucion:claim_returns(estado,modalidad,instrucciones,evidencia,evidencia_tienda,nota,estado_previo,flujo_nuevo,conformidad_comprador_at,conformidad_tienda_at,reembolso_importe,reembolso_fecha,reembolso_metodo,reembolso_comprobante),claim_movements(id,actor_id,actor_rol,etapa,creado_en),pedido_devolucion:orders!claims_order_id_fkey(status)",
   cancelacion: "id,order_id,request_id,cancelled_by,reason_code,reason_text,review_status,report_text,response_text,review_note,evidence_paths,created_at",
   sancion: "id,user_id,store_id,type,reason,starts_at,ends_at,source_type,source_id,appeal_text,appeal_status,revoked_at,revocation_reason,created_at,tienda:stores!sanctions_store_id_fkey(name)",
 };
@@ -451,6 +501,8 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
   const uid = useUid();
   const [filtroEstado, setFiltroEstado] = useState("");
   const [filtroApelacion, setFiltroApelacion] = useState("");
+  const [parametros, setParametros] = useSearchParams();
+  const reclamoNotificado = rol === "admin" && clase === "reclamo" ? parametros.get("reclamo") : null;
   const mostrarFiltros = rol === "admin" && !pedido;
   const tabla = tablaCasos(clase);
   const tiendas = useQuery({
@@ -463,7 +515,7 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
     },
   });
   const consulta = useQuery({
-    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas, soloVigentes, filtroEstado, filtroApelacion],
+    queryKey: ["casos", uid, clase, rol, pedido, idsTiendas, soloVigentes, filtroEstado, filtroApelacion, reclamoNotificado],
     enabled: Boolean(uid && supabase),
     refetchInterval: clase === "sancion" || clase === "reclamo" ? 15_000 : false,
     queryFn: async () => {
@@ -480,8 +532,9 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
         columnas += ",sancionado:profiles!sanctions_user_id_fkey(full_name)";
       }
       const base = supabase!.from(tabla).select(columnas);
-      if (mostrarFiltros) base.is("admin_archived_at", null);
-      if (mostrarFiltros && clase !== "sancion" && filtroEstado) {
+      if (reclamoNotificado) base.eq("id", reclamoNotificado);
+      else if (mostrarFiltros) base.is("admin_archived_at", null);
+      if (!reclamoNotificado && mostrarFiltros && clase !== "sancion" && filtroEstado) {
         base.eq(clase === "reclamo" ? "status" : "review_status", filtroEstado);
       }
       if (mostrarFiltros && clase === "sancion") {
@@ -496,7 +549,12 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
         }
       }
       if (pedido) base.eq("order_id", pedido);
-      if (clase === "reclamo" && idsTiendas) base.in("store_id", idsTiendas);
+      if (clase === "reclamo" && rol === "comprador") base.eq("buyer_id", uid);
+      if (clase === "reclamo" && rol === "vendedor") {
+        base.neq("buyer_id", uid);
+        if (idsTiendas) base.in("store_id", idsTiendas);
+        else if (!pedido) return [];
+      }
       if (clase === "sancion" && soloVigentes) {
         const ahora = new Date().toISOString();
         base.eq("user_id", uid).is("store_id", null).is("revoked_at", null)
@@ -505,13 +563,25 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
       }
       const { data, error } = await base.order("created_at", { ascending: false });
       if (error) throw error;
+      if (clase === "cancelacion" && rol !== "admin" && data.length) {
+        const cancelaciones = data as unknown as Cancelacion[];
+        const nombres = await supabase!.rpc("nombres_canceladores", { p_ids: cancelaciones.map(({ id }) => id) });
+        if (nombres.error) {
+          if (nombres.error.code === "PGRST202") return cancelaciones;
+          throw nombres.error;
+        }
+        const porId = new Map<string, Cancelacion["datos_cancelador"]>(
+          (nombres.data ?? []).map((fila: NonNullable<Cancelacion["datos_cancelador"]>) => [fila.id, fila]),
+        );
+        return cancelaciones.map((caso) => ({ ...caso, datos_cancelador: porId.get(caso.id) }));
+      }
       return data as unknown as (Reclamo | Cancelacion | Sancion)[];
     },
   });
 
   const accionesPapelera = useAccionesPapelera(tabla, mostrarFiltros ? consulta.data?.map((caso) => caso.id) ?? [] : []);
   const seleccion = useSeleccionPapelera(JSON.stringify([clase, filtroEstado, filtroApelacion]),
-    mostrarFiltros && (filtroEstado || filtroApelacion) ? consulta.data?.map((caso) => caso.id) ?? [] : []);
+    mostrarFiltros && !reclamoNotificado && accionesPapelera ? [...accionesPapelera.keys()] : []);
   const reclamosTienda = rol === "vendedor" && clase === "reclamo";
   const historial = useHistorialPersonal(reclamosTienda ? "reclamos_tienda" : clase,
     (rol === "comprador" || reclamosTienda) && !pedido && !soloVigentes);
@@ -525,9 +595,13 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
   };
   if (!supabase) return <p className="text-suave">Conecta Supabase para consultar los casos.</p>;
   return <div className="space-y-3">
-    {mostrarFiltros && <FiltroEstado estados={filtrosCaso[clase]} valor={filtroEstado} cambiar={setFiltroEstado} />}
+    {reclamoNotificado && <Boton variante="contorno" onClick={() => setParametros({})}>Ver todos los reclamos</Boton>}
+    {mostrarFiltros && !reclamoNotificado && <FiltroEstado estados={filtrosCaso[clase]} valor={filtroEstado} cambiar={setFiltroEstado} />}
     {mostrarFiltros && clase === "sancion" && <FiltroEstado etiqueta="Estado de la apelación"
       estados={["pendiente", "aceptada", "rechazada"]} valor={filtroApelacion} cambiar={setFiltroApelacion} />}
+    {mostrarFiltros && consulta.data?.length && accionesPapelera?.size === 0 ? (
+      <p className="text-sm text-suave">Los casos pendientes, las sanciones activas y las apelaciones abiertas permanecen en la lista.</p>
+    ) : null}
     {mostrarFiltros && <SeleccionPapelera tabla={tabla} seleccion={seleccion} acciones={accionesPapelera} />}
     <SeleccionHistorial historial={historial} ids={visibles.filter(puedeQuitar).map((caso) => caso.id)} />
     {clase === "sancion" && rol === "admin" && <SancionManual uid={uid} />}
@@ -536,8 +610,19 @@ export function ListaCasos({ clase, rol, pedido, tiendas: idsTiendas, soloVigent
     {consulta.isSuccess && visibles.length === 0 && !pedido && <p className="rounded-xl bg-white p-4 text-suave">No hay registros para este filtro.</p>}
     {visibles.map((caso) => {
       const accionPapelera = accionesPapelera?.get(caso.id);
-      const acciones = mostrarFiltros && (accionPapelera || seleccion.visibles.includes(caso.id))
+      const revocable = mostrarFiltros && clase === "sancion" && "appeal_status" in caso
+        && caso.appeal_status !== "pendiente" && estadoSancion(caso) === "Activa";
+      const pasoPrevio = !mostrarFiltros || accionPapelera ? null
+        : "buyer_id" in caso && (caso.status === "abierto" || caso.status === "en_revision") ? `resolver-${caso.id}`
+        : "buyer_id" in caso && caso.resolution === "sancion" && caso.devolucion?.estado === "por_sancionar" ? `sancionar-${caso.id}`
+        : "buyer_id" in caso && devolucionPendiente(caso.devolucion) ? `seguimiento-${caso.id}`
+        : "review_status" in caso && caso.review_status === "denunciada" ? `resolver-${caso.id}`
+        : "review_status" in caso && caso.review_status === "injustificada" ? `sancionar-${caso.id}`
+        : "appeal_status" in caso && caso.appeal_status === "pendiente" && !caso.revoked_at ? `apelar-${caso.id}` : null;
+      const acciones = revocable ? <TachoBaja id={caso.id} nombre="Sanción" tipo="sancion" />
+        : mostrarFiltros && (accionPapelera || seleccion.visibles.includes(caso.id))
         ? <AccionesTarjeta tabla={tabla} id={caso.id} seleccion={seleccion} accion={accionPapelera} />
+        : pasoPrevio ? <TachoParaResolver destino={pasoPrevio} etiqueta="Revisar el paso pendiente antes de archivar" />
         : historial.listo && puedeQuitar(caso) ? <AccionHistorial historial={historial} id={caso.id} /> : null;
       if (clase === "reclamo") return <FichaReclamo key={caso.id} caso={caso as Reclamo} rol={rol} uid={uid} acciones={acciones} enPedido={Boolean(pedido)}
         puedeResponder={rol === "vendedor" && Boolean(tiendas.data?.has((caso as Reclamo).store_id))} />;

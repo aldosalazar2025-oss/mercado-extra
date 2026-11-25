@@ -25,6 +25,7 @@ function rutaDe(n: Notificacion): string | null {
     case "pedido_estado":
     case "codigo_entrega":
     case "entrega_confirmada": {
+      if (n.payload.para === "admin" && typeof n.payload.claim_id === "string") return `/admin/reclamos?reclamo=${n.payload.claim_id}`;
       const oid = typeof n.payload.order_id === "string" ? n.payload.order_id : null;
       const para = n.payload.para === "vendedor" ? "vendedor" : "comprador";
       if (!oid) return para === "vendedor" ? "/vendedor/pedidos" : "/comprador/mis-compras";
